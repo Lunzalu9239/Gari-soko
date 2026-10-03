@@ -145,6 +145,14 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 .racts{position:absolute;right:10px;bottom:14px;display:flex;flex-direction:column;gap:10px}
 .racts button{display:flex;flex-direction:column;align-items:center;background:rgba(0,0,0,.5);color:#fff;border:0;border-radius:24px;padding:8px 10px;font-size:1.15rem;cursor:pointer}
 .racts span{font-size:.74rem}.racts .sel{background:var(--accent)}
+.iconbtn{width:42px;height:42px;border-radius:50%;border:0;background:var(--bg);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex:none;font:inherit;transition:transform .12s}
+.iconbtn:active{transform:scale(.88)}.iconbtn svg{width:22px;height:22px}
+.cin .norm{display:flex;gap:8px;align-items:center;flex:1}.cin .norm input[id=mi]{flex:1}
+.cin .recbar{display:none;flex:1;align-items:center;gap:10px}.cin.recording .norm{display:none}.cin.recording .recbar{display:flex}
+.recdot{width:11px;height:11px;border-radius:50%;background:#e0443e;animation:rp 1s infinite}
+@keyframes rp{50%{opacity:.25}}
+.mimg{max-width:100%;max-height:300px;border-radius:12px;display:block;margin-bottom:4px;cursor:pointer;background:var(--bg);min-height:60px;min-width:120px}
+.m audio{display:block;width:230px;max-width:100%;height:38px;margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -310,11 +318,14 @@ async function openChat(listingId, sellerId){
   activeConv = c.id; go("chat");
 }
 const hm = t => new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
-const bubble = m => `<div class="m ${m.sender_id === me.id ? "me" : ""}">${esc(m.body)}<span class="bt">${hm(m.created_at)}</span></div>`;
+const bubble = m => {
+  const md = m.media_path ? (m.media_type === "audio" ? `<audio controls preload="none" data-p="${esc(m.media_path)}"></audio>` : `<img class="mimg" alt="Photo" data-p="${esc(m.media_path)}" onclick="if(this.src)window.open(this.src)">`) : "";
+  return `<div class="m ${m.sender_id === me.id ? "me" : ""}">${md}${m.body ? esc(m.body) : ""}<span class="bt">${hm(m.created_at)}</span></div>`;
+};
 function addMsg(m){
   if (shown.has(m.id)) return; shown.add(m.id);
   const box = $("#ms"); if (!box) return;
-  box.insertAdjacentHTML("beforeend", bubble(m)); box.scrollTop = box.scrollHeight;
+  box.insertAdjacentHTML("beforeend", bubble(m)); box.scrollTop = box.scrollHeight; hydrate(box);
 }
 async function chat(){
   if (!me) return go("login");
@@ -835,12 +846,16 @@ async function openDm(uid, quiet){
     if (r.error) { toast("You can only chat privately with friends"); return go("friends", true); } t = r.data; }
   const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count,verified").eq("id",uid).single(),
     db.from("dm_messages").select("*").eq("thread_id",t.id).order("created_at")]);
-  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id);
+  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curThread = t.id;
   $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><button class="avatar" onclick="openProfile('${uid}')">${avatarInner(pr.data)}</button>
     <div><div style="font-weight:700">${nameLink(pr.data,uid)}</div><div class="meta">Private chat</div></div></div>
     <div class="msgs" id="ms">${(ms.data||[]).map(bubble).join("")}</div>
-    <div class="cin"><input id="mi" placeholder="Message" maxlength="2000" autocomplete="off"><button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div></div></div>`;
-  const box = $("#ms"); box.scrollTop = box.scrollHeight;
+    <div class="cin" id="cin"><div class="norm"><label class="iconbtn" title="Send a photo">${ICON.feed}<input type="file" accept="image/*" hidden onchange="sendPhoto(this)"></label>
+    <input id="mi" placeholder="Message" maxlength="2000" autocomplete="off"><button class="iconbtn" id="mic" aria-label="Record a voice note" onclick="recStart()">${ICON.mic}</button>
+    <button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div>
+    <div class="recbar"><span class="recdot"></span><span id="rt">0:00</span><span class="meta" style="flex:1">Recording...</span>
+    <button class="iconbtn" onclick="recStop(false)" aria-label="Cancel">✕</button><button class="sendbtn" onclick="recStop(true)" aria-label="Send voice note">${ICON.send}</button></div></div></div></div>`;
+  const box = $("#ms"); box.scrollTop = box.scrollHeight; hydrate(box);
   if (chan) db.removeChannel(chan);
   chan = db.channel("dm"+t.id).on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => { addMsg(p.new); markSeen(t.id); }).subscribe();
   const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
@@ -875,11 +890,11 @@ async function chats(){
     db.from("conversations").select(`id,buyer_id,seller_id,created_at,listings(make,model,year),buyer:profiles!conversations_buyer_id_fkey(${P}),seller:profiles!conversations_seller_id_fkey(${P})`)]);
   if (dt.error || cv.error) { $("#cl").innerHTML = `<div class="empty">${esc((dt.error || cv.error).message)}</div>`; return; }
   const [dm, cm2] = await Promise.all([
-    dt.data.length ? db.from("dm_messages").select("thread_id,body,sender_id,created_at").in("thread_id", dt.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] },
+    dt.data.length ? db.from("dm_messages").select("thread_id,body,sender_id,created_at,media_type").in("thread_id", dt.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] },
     cv.data.length ? db.from("messages").select("conversation_id,body,sender_id,created_at").in("conversation_id", cv.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] }]);
   const lastBy = (r, k) => { const o = {}; (r.data || []).forEach(m => { if (!o[m[k]]) o[m[k]] = m; }); return o; };
   const ld = lastBy(dm, "thread_id"), lc = lastBy(cm2, "conversation_id"), sn = seen();
-  const mk = (id, o, l, created, extra) => ({ key:id, p:o, name:o?.full_name || "User", sub: l ? (l.sender_id === me.id ? "You: " : "") + l.body : "Say hello 👋", time:l?.created_at || created,
+  const mk = (id, o, l, created, extra) => ({ key:id, p:o, name:o?.full_name || "User", sub: l ? (l.sender_id === me.id ? "You: " : "") + (l.body || (l.media_type === "audio" ? "🎤 Voice note" : "📷 Photo")) : "Say hello 👋", time:l?.created_at || created,
     unread: !!l && l.sender_id !== me.id && new Date(l.created_at).getTime() > (sn[id] || 0), ...extra });
   inbox = [
     ...dt.data.map(x => { const o = x.user_a === me.id ? x.b : x.a; return mk(x.id, o, ld[x.id], x.created_at, { open:`openDm('${o.id}')` }); }),
@@ -905,6 +920,47 @@ async function newChat(){
   box.innerHTML = `<div class="panel"><h3>Start a chat</h3>${fr.map(o => `<div class="q" style="display:flex;gap:10px;align-items:center;cursor:pointer" onclick="openDm('${o.id}')"><span class="avatar sm">${avatarInner(o)}</span><div style="flex:1">${esc(o.full_name)}${tick(o.verified)}</div></div>`).join("")
     || '<div class="meta">You have no friends yet. <a href="#" class="un" onclick="go(\'friends\');return false">Find people</a> and send a friend request.</div>'}</div>`;
 }
+
+// ---------- Photos and voice notes in private chats ----------
+let curThread = null, rec = null, recChunks = [], recT = null, recSec = 0, recSend = true;
+ICON.mic = _i('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>');
+async function hydrate(root){
+  const els = [...(root || document).querySelectorAll("[data-p]:not([src])")]; if (!els.length) return;
+  const { data } = await db.storage.from("chat-media").createSignedUrls([...new Set(els.map(e => e.dataset.p))], 3600);
+  const map = {}; (data || []).forEach(x => { if (x.signedUrl) map[x.path] = x.signedUrl; });
+  els.forEach(e => { if (map[e.dataset.p]) e.src = map[e.dataset.p]; });
+}
+async function sendMedia(blob, type, kind){
+  if (!curThread) return;
+  const ext = kind === "image" ? "jpg" : type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : type.includes("mpeg") ? "mp3" : "webm";
+  const path = `${me.id}/${Date.now()}.${ext}`;
+  const up = await db.storage.from("chat-media").upload(path, blob, { contentType:type });
+  if (up.error) return toast(up.error.message);
+  const r = await db.from("dm_messages").insert({ thread_id:curThread, sender_id:me.id, body:"", media_path:path, media_type:kind }).select().single();
+  if (r.error) toast(r.error.message); else addMsg(r.data);
+}
+async function sendPhoto(inp){
+  const f = inp.files[0]; inp.value = ""; if (!f) return;
+  toast("Sending photo..."); await sendMedia(await shrink(f), "image/jpeg", "image");
+}
+async function recStart(){
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast("Voice notes are not supported on this browser");
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ audio:true });
+    const mt = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find(t => MediaRecorder.isTypeSupported(t)) || "";
+    rec = new MediaRecorder(st, mt ? { mimeType:mt } : undefined); recChunks = []; recSend = true;
+    rec.ondataavailable = e => { if (e.data.size) recChunks.push(e.data); };
+    rec.onstop = async () => {
+      st.getTracks().forEach(t => t.stop()); clearInterval(recT); $("#cin")?.classList.remove("recording");
+      if (!recSend || !recChunks.length) return;
+      const type = (rec.mimeType || mt || "audio/webm").split(";")[0];
+      await sendMedia(new Blob(recChunks, { type }), type, "audio");
+    };
+    rec.start(); recSec = 0; $("#cin").classList.add("recording"); $("#rt").textContent = "0:00";
+    recT = setInterval(() => { recSec++; $("#rt").textContent = Math.floor(recSec/60) + ":" + String(recSec%60).padStart(2,"0"); if (recSec >= 120) recStop(true); }, 1000);
+  } catch (e) { toast("Allow microphone access to record voice notes"); }
+}
+function recStop(send){ recSend = send; if (rec && rec.state !== "inactive") rec.stop(); }
 
 // ---------- Install as app ----------
 let deferred = null;
