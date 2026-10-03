@@ -1,12 +1,12 @@
 {
- "name": "Gari Soko",
- "short_name": "Gari Soko",
- "description": "Buy and sell vehicles, and get mechanic help.",
+ "name": "TUchat",
+ "short_name": "TUchat",
+ "description": "Chat, share posts, reels and groups.",
  "start_url": "/",
  "scope": "/",
  "display": "standalone",
- "background_color": "#1b2430",
- "theme_color": "#1b2430",
+ "background_color": "#e8eefa",
+ "theme_color": "#4a74d9",
  "icons": [
   {
    "src": "icon-192.png",
