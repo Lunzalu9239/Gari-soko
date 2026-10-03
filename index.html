@@ -104,7 +104,7 @@ function render(){ ({browse, sell, admin, login, mech, chat, feed})[tab](); }
 async function browse(){
   $("#view").innerHTML = '<div class="empty">Loading vehicles...</div>';
   const { data, error } = await db.from("listings")
-    .select("*, listing_photos(path), profiles(full_name, business_name, role, verified)")
+    .select("*, listing_photos(path), profiles!listings_seller_id_fkey(full_name, business_name, role, verified)")
     .eq("status","approved").order("created_at",{ascending:false});
   if (error) { $("#view").innerHTML = `<div class="empty">Could not load: ${esc(error.message)}</div>`; return; }
   cars = data; drawCars(true);
@@ -253,7 +253,7 @@ async function chat(){
 async function mech(){
   $("#view").innerHTML = '<div class="empty">Loading...</div>';
   const [q, m] = await Promise.all([
-    db.from("questions").select("id,body,profiles(full_name),answers(id,body,profiles(full_name,verified))").order("created_at",{ascending:false}),
+    db.from("questions").select("id,body,profiles!questions_author_id_fkey(full_name),answers(id,body,profiles!answers_mechanic_id_fkey(full_name,verified))").order("created_at",{ascending:false}),
     db.from("profiles").select("full_name,business_name,town,verified").eq("role","mechanic")]);
   if (q.error) { $("#view").innerHTML = `<div class="empty">${esc(q.error.message)}</div>`; return; }
   const isM = profile?.role === "mechanic";
@@ -297,7 +297,7 @@ async function feed(){
     feed();
   };
   const { data, error } = await db.from("posts")
-    .select("id,caption,image_path,created_at,author_id,profiles(full_name),post_votes(user_id,value),post_comments(count)")
+    .select("id,caption,image_path,created_at,author_id,profiles!posts_author_id_fkey(full_name),post_votes(user_id,value),post_comments(count)")
     .order("created_at",{ascending:false}).limit(50);
   if (error) { $("#plist").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
   posts = data; drawFeed();
@@ -337,13 +337,13 @@ async function vote(id, val){
 }
 async function toggleC(id){
   if (openC.has(id)) { openC.delete(id); return drawFeed(); }
-  const { data } = await db.from("post_comments").select("id,body,created_at,profiles(full_name)").eq("post_id",id).order("created_at");
+  const { data } = await db.from("post_comments").select("id,body,created_at,profiles!post_comments_author_id_fkey(full_name)").eq("post_id",id).order("created_at");
   cm[id] = data || []; openC.add(id); drawFeed();
 }
 async function addComment(id){
   if (!me) { toast("Log in to comment"); return go("login"); }
   const v = $("#ci"+id).value.trim(); if (!v) return;
-  const r = await db.from("post_comments").insert({ post_id:id, author_id:me.id, body:v }).select("id,body,created_at,profiles(full_name)").single();
+  const r = await db.from("post_comments").insert({ post_id:id, author_id:me.id, body:v }).select("id,body,created_at,profiles!post_comments_author_id_fkey(full_name)").single();
   if (r.error) return toast(r.error.message);
   cm[id].push(r.data); const p = posts.find(x => x.id === id);
   p.post_comments = [{ count: (p.post_comments?.[0]?.count || 0) + 1 }]; drawFeed();
