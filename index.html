@@ -75,6 +75,12 @@ input,select,textarea{border-radius:10px;background:var(--card);color:var(--ink)
 .thumbs img{width:64px;height:48px;object-fit:cover;border-radius:8px;cursor:pointer;border:1px solid var(--line)}
 .replies{margin-left:16px;border-left:2px solid var(--line);padding-left:8px}
 #toast{background:var(--bar)}
+
+.avatar{width:36px;height:36px;border-radius:50%;border:0;background:var(--accent);color:#1f2933;font-weight:800;cursor:pointer;overflow:hidden;padding:0;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.avatar img{width:100%;height:100%;object-fit:cover}.avatar.sm{width:34px;height:34px}.avatar.big{width:72px;height:72px;font-size:1.8rem;cursor:default}
+.un{color:inherit;text-decoration:none;font-weight:700;cursor:pointer}.un:hover{text-decoration:underline}
+.crown{vertical-align:-3px;margin-left:4px}
+.pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.pgrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
 </style>
 </head>
 <body>
@@ -89,7 +95,7 @@ const SUPABASE_URL = "https://odvraclnvjwlvzrmjxsn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_RkQVJ7BZ6kCSApLunK9fMw_I92Zg7JJ";
 // =======================================================================
 
-const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, storage: window.localStorage } });
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt = n => "KSh " + Number(n).toLocaleString("en-KE");
@@ -102,9 +108,7 @@ async function refreshUser(){
   const { data:{ user } } = await db.auth.getUser();
   me = user; profile = null;
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
-  $("#who").innerHTML = me
-    ? `${esc(profile?.full_name || me.email)} (${esc(profile?.role || "")}) <button class="btn alt" style="color:#fff" onclick="logout()">Log out</button>`
-    : "";
+  $("#who").innerHTML = me ? `<button class="avatar" title="My profile" onclick="openProfile('${me.id}')">${avatarInner(profile)}</button> <button class="btn alt" style="color:#fff;border-color:#ffffff55;padding:6px 10px" onclick="logout()">Log out</button>` : "";
   drawNav(); render();
 }
 async function logout(){ await db.auth.signOut(); tab="browse"; refreshUser(); }
@@ -125,7 +129,7 @@ function render(){ ({browse, sell, admin, login, mech, chat, feed})[tab](); }
 async function browse(){
   $("#view").innerHTML = '<div class="empty">Loading vehicles...</div>';
   const { data, error } = await db.from("listings")
-    .select("*, listing_photos(path), profiles!listings_seller_id_fkey(full_name, business_name, role, verified)")
+    .select("*, listing_photos(path), profiles!listings_seller_id_fkey(full_name, business_name, role, verified, followers_count, avatar_path)")
     .eq("status","approved").order("created_at",{ascending:false});
   if (error) { $("#view").innerHTML = `<div class="empty">Could not load: ${esc(error.message)}</div>`; return; }
   cars = data; drawCars(true);
@@ -318,7 +322,7 @@ async function feed(){
     feed();
   };
   const { data, error } = await db.from("posts")
-    .select("id,caption,image_path,created_at,author_id,profiles!posts_author_id_fkey(full_name),post_votes(user_id,value),post_comments(count)")
+    .select("id,caption,image_path,created_at,author_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count),post_votes(user_id,value),post_comments(count)")
     .order("created_at",{ascending:false}).limit(50);
   if (error) { $("#plist").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
   posts = data; drawFeed();
@@ -329,9 +333,9 @@ function postHtml(p){
   const nc = p.post_comments?.[0]?.count || 0;
   const own = me && (me.id === p.author_id || profile?.role === "admin");
   const cs = openC.has(p.id) ? commentsHtml(p.id) : "";
-  return `<article class="car" style="margin-bottom:14px"><div class="body"><strong>${esc(p.profiles?.full_name||"User")}</strong><span class="meta">${ago(p.created_at)}</span></div>
+  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}</div></div></div>${p.caption?`<div style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
   <img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">
-  <div class="body">${p.caption?`<div>${esc(p.caption)}</div>`:""}
+  <div class="body">
   <div class="row acts"><button class="btn alt ${mine===1?"sel":""}" onclick="vote('${p.id}',1)">👍 ${up}</button>
   <button class="btn alt ${mine===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎 ${dn}</button>
   <button class="btn alt" onclick="toggleC('${p.id}')">💬 ${nc} comment${nc===1?"":"s"}</button></div>
@@ -357,14 +361,14 @@ async function vote(id, val){
 }
 async function toggleC(id){
   if (openC.has(id)) { openC.delete(id); return drawFeed(); }
-  const { data } = await db.from("post_comments").select("id,body,created_at,parent_id,profiles!post_comments_author_id_fkey(full_name)").eq("post_id",id).order("created_at");
+  const { data } = await db.from("post_comments").select("id,body,created_at,parent_id,author_id,profiles!post_comments_author_id_fkey(full_name,followers_count)").eq("post_id",id).order("created_at");
   cm[id] = data || []; openC.add(id); drawFeed();
 }
 async function addComment(id, parent){
   if (!me) { toast("Log in to comment"); return go("login"); }
   const box = $(parent ? "#ri"+parent : "#ci"+id); const v = box.value.trim(); if (!v) return;
   const r = await db.from("post_comments").insert({ post_id:id, author_id:me.id, body:v, parent_id:parent||null })
-    .select("id,body,created_at,parent_id,profiles!post_comments_author_id_fkey(full_name)").single();
+    .select("id,body,created_at,parent_id,author_id,profiles!post_comments_author_id_fkey(full_name,followers_count)").single();
   if (r.error) return toast(r.error.message);
   cm[id].push(r.data); if (parent) delete replyOpen[parent];
   const p = posts.find(x => x.id === id);
@@ -387,7 +391,7 @@ async function reportPost(id){
 let replyOpen = {};
 function commentsHtml(pid){
   const all = cm[pid] || [], top = all.filter(c => !c.parent_id);
-  const one = (c, root) => `<div class="ans"><span class="meta">${esc(c.profiles?.full_name||"User")} · ${ago(c.created_at)}</span><div>${esc(c.body)}</div>
+  const one = (c, root) => `<div class="ans"><span class="meta">${nameLink(c.profiles,c.author_id)} · ${ago(c.created_at)}</span><div>${esc(c.body)}</div>
     <button class="lnk" onclick="replyBox('${pid}','${root}','${c.id}')">Reply</button></div>`;
   const list = top.map(c => `<div>${one(c, c.id)}<div class="replies">${all.filter(r => r.parent_id === c.id).map(r => one(r, c.id)).join("")}
     ${c.id in replyOpen ? `<div class="send" style="margin:6px 0"><input id="ri${c.id}" value="${esc(replyOpen[c.id])}" placeholder="Write a reply" maxlength="1000"><button class="btn" onclick="addComment('${pid}','${c.id}')">Send</button></div>` : ""}</div></div>`).join("");
@@ -420,7 +424,7 @@ function openCar(id){
   <h2 style="margin:2px 0">${c.year} ${esc(c.make)} ${esc(c.model)}</h2>
   <div class="meta">${esc(c.town)}</div>
   <p>${esc(c.description || "No description added.")}</p>
-  <div><span class="tag ${co?"co":""}">${co?"Company":"Private"}${s.verified?" · Verified":""}</span> ${esc(s.business_name || s.full_name || "")}</div>
+  <div><span class="tag ${co?"co":""}">${co?"Company":"Private"}${s.verified?" · Verified":""}</span> ${nameLink({full_name:s.business_name||s.full_name,followers_count:s.followers_count},c.seller_id)}</div>
   <div class="row"><button class="btn" onclick="openChat('${c.id}','${c.seller_id}')">Chat</button>
   ${wa ? `<a class="btn wa" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent("Hi, is the "+c.year+" "+c.make+" "+c.model+" still available?")}">WhatsApp</a>` : ""}
   <button class="btn alt" onclick="reportListing('${c.id}')">Report</button></div></div>`;
@@ -435,6 +439,58 @@ function setTheme(t){
 }
 $("#theme").onclick = () => setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
 { let t = "light"; try { t = localStorage.getItem("gs-theme") || "light"; } catch (e) {} setTheme(t); }
+
+// ---------- Crowns, names, avatars ----------
+const CROWNS = [[1000,"#d4a017","Gold"],[100,"#98a2ad","Silver"],[50,"#b87333","Bronze"]];
+function crown(n){ const c = CROWNS.find(x => (n||0) >= x[0]);
+  return c ? `<svg class="crown" viewBox="0 0 24 24" width="16" height="16" role="img"><title>${c[2]} crown: ${c[0]}+ followers</title><path fill="${c[1]}" d="M2 19h20v2H2zM3 7l4.5 4L12 4l4.5 7L21 7l-2 10H5z"/></svg>` : ""; }
+const nameLink = (p, uid) => `<a href="#" class="un" onclick="openProfile('${uid}');return false">${esc(p?.full_name || "User")}</a>${crown(p?.followers_count)}`;
+function avatarInner(p){ return p?.avatar_path ? `<img src="${photoUrl(p.avatar_path)}" alt="">` : esc((p?.full_name || "?").trim().charAt(0).toUpperCase()); }
+
+// ---------- Profile page ----------
+async function openProfile(uid){
+  tab = ""; drawNav(); $("#view").innerHTML = '<div class="empty">Loading profile...</div>';
+  const mine = !!me && me.id === uid;
+  const [pr, ps, fg, fw] = await Promise.all([
+    db.from("profiles").select("id,full_name,bio,town,business_name,role,verified,avatar_path,followers_count" + (mine ? ",phone" : "")).eq("id",uid).single(),
+    db.from("posts").select("id,image_path").eq("author_id",uid).order("created_at",{ascending:false}).limit(30),
+    db.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",uid),
+    me ? db.from("follows").select("follower_id").eq("follower_id",me.id).eq("followee_id",uid).maybeSingle() : Promise.resolve({data:null})]);
+  if (pr.error) { $("#view").innerHTML = `<div class="empty">${esc(pr.error.message)}</div>`; return; }
+  const u = pr.data, following = !!fw.data, n = u.followers_count || 0;
+  const next = n < 50 ? `${50-n} more followers for a Bronze crown` : n < 100 ? `${100-n} more for Silver` : n < 1000 ? `${1000-n} more for Gold` : "Gold crown reached";
+  $("#view").innerHTML = `<div class="panel" style="max-width:640px;margin:0 auto 14px"><div style="display:flex;gap:14px;align-items:center">
+    <div class="avatar big">${avatarInner(u)}</div><div><h2 style="margin:0">${esc(u.business_name || u.full_name || "User")}${crown(n)}</h2>
+    <div class="meta">${esc(u.role)}${u.verified ? " · Verified" : ""}${u.town ? " · " + esc(u.town) : ""}</div></div></div>
+    ${u.bio ? `<p>${esc(u.bio)}</p>` : ""}
+    <div class="meta"><strong>${n}</strong> followers · <strong>${fg.count || 0}</strong> following · <strong>${ps.data.length}</strong> photos · ${next}</div>
+    ${mine ? "" : `<div class="row"><button class="btn ${following ? "alt" : ""}" onclick="toggleFollow('${uid}',${following})">${following ? "Following ✓" : "Follow"}</button></div>`}</div>
+    ${mine ? `<div class="panel" style="max-width:640px;margin:0 auto 14px"><h3>Edit profile</h3><form class="f" id="pf2">
+      <div><label>Your name</label><input name="full_name" value="${esc(u.full_name)}" required></div>
+      <div><label>Business name (companies and mechanics)</label><input name="business_name" value="${esc(u.business_name)}"></div>
+      <div><label>Phone</label><input name="phone" value="${esc(u.phone)}"></div>
+      <div><label>Town</label><input name="town" value="${esc(u.town)}"></div>
+      <div class="w"><label>About you (300 characters)</label><textarea name="bio" rows="3" maxlength="300">${esc(u.bio)}</textarea></div>
+      <div class="w"><label>Profile photo</label><input name="avatar" type="file" accept="image/*"></div>
+      <div class="w"><button class="btn" id="ps" type="submit">Save profile</button></div></form></div>` : ""}
+    <div style="max-width:640px;margin:0 auto"><h3>Photos</h3><div class="pgrid">${ps.data.map(x => `<img src="${photoUrl(x.image_path)}" loading="lazy" alt="">`).join("") || '<div class="meta">No photos yet.</div>'}</div></div>`;
+  if (mine) $("#pf2").onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target); $("#ps").disabled = true;
+    const upd = { full_name:f.get("full_name"), business_name:f.get("business_name") || null, phone:f.get("phone") || null, town:f.get("town") || null, bio:f.get("bio") || null };
+    const file = e.target.avatar.files[0];
+    if (file) { const path = `${me.id}/avatar-${Date.now()}.jpg`;
+      const up = await db.storage.from("vehicle-photos").upload(path, await shrink(file), { contentType:"image/jpeg" });
+      if (up.error) { toast(up.error.message); $("#ps").disabled = false; return; } upd.avatar_path = path; }
+    const r = await db.from("profiles").update(upd).eq("id", me.id);
+    toast(r.error ? r.error.message : "Profile saved"); await refreshUser(); openProfile(me.id);
+  };
+}
+async function toggleFollow(uid, isFollowing){
+  if (!me) { toast("Log in to follow people"); return go("login"); }
+  const r = isFollowing ? await db.from("follows").delete().eq("follower_id",me.id).eq("followee_id",uid)
+                        : await db.from("follows").insert({ follower_id:me.id, followee_id:uid });
+  if (r.error) toast(r.error.message); openProfile(uid);
+}
 
 // ---------- Install as app ----------
 let deferred = null;
