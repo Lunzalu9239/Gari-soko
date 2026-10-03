@@ -84,7 +84,7 @@ input,select,textarea{border-radius:10px;background:var(--card);color:var(--ink)
 </style>
 </head>
 <body>
-<header><h1><span>Gari</span>Soko</h1><div style="display:flex;gap:8px;align-items:center"><div id="who"></div><button id="theme" class="btn alt" style="color:#fff;border-color:#ffffff55;padding:6px 10px" aria-label="Switch light or dark mode">🌙</button></div></header>
+<header><div style="display:flex;gap:8px;align-items:center"><button id="back" class="btn alt" style="display:none;color:#fff;border-color:#ffffff55;padding:6px 12px" onclick="goBack()" aria-label="Go back">←</button><h1><span>Gari</span>Soko</h1></div><div style="display:flex;gap:8px;align-items:center"><div id="who"></div><button id="theme" class="btn alt" style="color:#fff;border-color:#ffffff55;padding:6px 10px" aria-label="Switch light or dark mode">🌙</button></div></header>
 <nav id="nav"></nav>
 <main id="view"></main>
 <button id="inst" class="btn" style="display:none;position:fixed;right:14px;bottom:14px;z-index:8">Install app</button>
@@ -100,7 +100,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const fmt = n => "KSh " + Number(n).toLocaleString("en-KE");
 const photoUrl = p => db.storage.from("vehicle-photos").getPublicUrl(p).data.publicUrl;
-let me = null, profile = null, tab = "browse", cars = [], fq = "", fm = "";
+let me = null, profile = null, tab = "home", cars = [], fq = "", fm = "";
 
 function toast(t){const e=$("#toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",3000)}
 
@@ -111,10 +111,10 @@ async function refreshUser(){
   $("#who").innerHTML = me ? `<button class="avatar" title="My profile" onclick="openProfile('${me.id}')">${avatarInner(profile)}</button> <button class="btn alt" style="color:#fff;border-color:#ffffff55;padding:6px 10px" onclick="logout()">Log out</button>` : "";
   drawNav(); render();
 }
-async function logout(){ await db.auth.signOut(); tab="browse"; refreshUser(); }
+async function logout(){ await db.auth.signOut(); tab="home"; refreshUser(); }
 
 function drawNav(){
-  const t = {browse:"Browse vehicles", feed:"Photo feed", mech:"Mechanics & advice"};
+  const t = {home:"Home", browse:"Vehicles", feed:"Photo feed", groups:"Groups", mech:"Mechanics & advice"};
   if (me && profile?.role !== "mechanic" && profile?.role !== "buyer") t.sell = "Sell a vehicle";
   if (me && profile?.role === "buyer") t.sell = "Sell a vehicle";
   if (me) t.chat = "Messages";
@@ -122,8 +122,8 @@ function drawNav(){
   if (!me) t.login = "Log in / Sign up";
   $("#nav").innerHTML = Object.entries(t).map(([k,v]) => `<button class="${k===tab?"on":""}" onclick="go('${k}')">${v}</button>`).join("");
 }
-function go(t){ tab=t; drawNav(); render(); }
-function render(){ ({browse, sell, admin, login, mech, chat, feed})[tab](); }
+function go(t, quiet){ tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
+function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups})[tab] || (() => {}))(); }
 
 // ---------- Browse ----------
 async function browse(){
@@ -220,12 +220,12 @@ function login(){
   <div class="w"><button class="btn" type="submit">Create account</button></div></form></div>`;
   $("#lf").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
     const { error } = await db.auth.signInWithPassword({ email:f.email, password:f.password });
-    if (error) return toast(error.message); tab="browse"; refreshUser(); };
+    if (error) return toast(error.message); tab="home"; refreshUser(); };
   $("#sg").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
     const { data, error } = await db.auth.signUp({ email:f.email, password:f.password, options:{ data:{ full_name:f.full_name, phone:f.phone, role:f.role } } });
     if (error) return toast(error.message);
     if (!data.session) return toast("Check your email to confirm, then log in");
-    tab="browse"; refreshUser(); };
+    tab="home"; refreshUser(); };
 }
 
 // ---------- Chat ----------
@@ -304,6 +304,7 @@ async function answer(qid){
 let posts = [], openC = new Set(), cm = {};
 const ago = t => { const s=(Date.now()-new Date(t))/1000; if(s<60) return "just now"; if(s<3600) return Math.floor(s/60)+" min ago"; if(s<86400) return Math.floor(s/3600)+" h ago"; return Math.floor(s/86400)+" d ago"; };
 async function feed(){
+  feedRender = null;
   $("#view").innerHTML = `<div class="feedcol"><div id="comp"></div><div id="plist"><div class="empty">Loading photos...</div></div></div>`;
   $("#comp").innerHTML = me ? `<div class="panel"><h3>Share a photo</h3>
     <input id="pf" type="file" accept="image/*"><div style="height:8px"></div>
@@ -322,7 +323,7 @@ async function feed(){
     feed();
   };
   const { data, error } = await db.from("posts")
-    .select("id,caption,image_path,created_at,author_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count),post_votes(user_id,value),post_comments(count)")
+    .select(POST_SEL).is("group_id", null)
     .order("created_at",{ascending:false}).limit(50);
   if (error) { $("#plist").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
   posts = data; drawFeed();
@@ -333,7 +334,7 @@ function postHtml(p){
   const nc = p.post_comments?.[0]?.count || 0;
   const own = me && (me.id === p.author_id || profile?.role === "admin");
   const cs = openC.has(p.id) ? commentsHtml(p.id) : "";
-  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}</div></div></div>${p.caption?`<div style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
+  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
   <img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">
   <div class="body">
   <div class="row acts"><button class="btn alt ${mine===1?"sel":""}" onclick="vote('${p.id}',1)">👍 ${up}</button>
@@ -343,7 +344,7 @@ function postHtml(p){
 }
 function drawFeed(){
   const y = window.scrollY;
-  $("#plist").innerHTML = posts.map(postHtml).join("") || '<div class="empty">No photos yet. Be the first to post.</div>';
+  $("#plist").innerHTML = feedRender ? feedRender() : (posts.map(postHtml).join("") || '<div class="empty">No photos yet. Be the first to post.</div>');
   window.scrollTo(0, y);
 }
 async function vote(id, val){
@@ -413,10 +414,11 @@ function miniCard(c){
   <div class="price">${fmt(c.price)}</div><strong>${c.year} ${esc(c.make)} ${esc(c.model)}</strong>
   <div class="meta">${esc(c.town)} · <span class="tag ${co?"co":""}">${co?"Company":"Private"}</span></div></div></article>`;
 }
-function openCar(id){
-  const c = cars.find(x => x.id === id), s = c.profiles || {}, co = s.role === "company";
+function openCar(id, quiet){
+  const c = cars.find(x => x.id === id); if (!c) return go("browse", true); if (!quiet) push("car", id);
+  const s = c.profiles || {}, co = s.role === "company";
   const wa = String(c.whatsapp||"").replace(/\D/g,""), ph = (c.listing_photos||[]).map(x => photoUrl(x.path));
-  $("#view").innerHTML = `<button class="btn alt" onclick="drawCars()">← Back to vehicles</button>
+  $("#view").innerHTML = `<button class="btn alt" onclick="goBack()">← Back</button>
   <div class="panel" style="margin-top:12px;max-width:640px">
   ${ph.length ? `<img id="mainph" class="pimg" src="${ph[0]}" alt="">` : '<div class="pic"></div>'}
   ${ph.length > 1 ? `<div class="thumbs">${ph.map(u => `<img src="${u}" alt="" onclick="document.getElementById('mainph').src='${u}'">`).join("")}</div>` : ""}
@@ -448,8 +450,8 @@ const nameLink = (p, uid) => `<a href="#" class="un" onclick="openProfile('${uid
 function avatarInner(p){ return p?.avatar_path ? `<img src="${photoUrl(p.avatar_path)}" alt="">` : esc((p?.full_name || "?").trim().charAt(0).toUpperCase()); }
 
 // ---------- Profile page ----------
-async function openProfile(uid){
-  tab = ""; drawNav(); $("#view").innerHTML = '<div class="empty">Loading profile...</div>';
+async function openProfile(uid, quiet){
+  tab = ""; drawNav(); if (!quiet) push("profile", uid); $("#view").innerHTML = '<div class="empty">Loading profile...</div>';
   const mine = !!me && me.id === uid;
   const [pr, ps, fg, fw] = await Promise.all([
     db.from("profiles").select("id,full_name,bio,town,business_name,role,verified,avatar_path,followers_count" + (mine ? ",phone" : "")).eq("id",uid).single(),
@@ -482,14 +484,105 @@ async function openProfile(uid){
       const up = await db.storage.from("vehicle-photos").upload(path, await shrink(file), { contentType:"image/jpeg" });
       if (up.error) { toast(up.error.message); $("#ps").disabled = false; return; } upd.avatar_path = path; }
     const r = await db.from("profiles").update(upd).eq("id", me.id);
-    toast(r.error ? r.error.message : "Profile saved"); await refreshUser(); openProfile(me.id);
+    toast(r.error ? r.error.message : "Profile saved"); await refreshUser(); openProfile(me.id, true);
   };
 }
 async function toggleFollow(uid, isFollowing){
   if (!me) { toast("Log in to follow people"); return go("login"); }
   const r = isFollowing ? await db.from("follows").delete().eq("follower_id",me.id).eq("followee_id",uid)
                         : await db.from("follows").insert({ follower_id:me.id, followee_id:uid });
-  if (r.error) toast(r.error.message); openProfile(uid);
+  if (r.error) toast(r.error.message); openProfile(uid, true);
+}
+
+// ---------- Back button (step by step) ----------
+let depth = 0;
+function upBack(){ const b = document.getElementById("back"); if (b) b.style.display = depth > 0 ? "inline-flex" : "none"; }
+function push(name, arg){ history.pushState({ name, arg, d: ++depth }, ""); upBack(); }
+function goBack(){ if (depth > 0) history.back(); else go("home", true); }
+function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
+window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; upBack(); if (!st) { go("home", true); return; } restore(st); });
+history.replaceState({ name:"tab", arg:"home", d:0 }, "");
+
+// ---------- Groups ----------
+const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name)";
+let feedRender = null, homeItems = [];
+async function groups(){
+  feedRender = null;
+  $("#view").innerHTML = '<div class="feedcol"><div id="gc"></div><div id="gl"><div class="empty">Loading groups...</div></div></div>';
+  $("#gc").innerHTML = me ? `<div class="panel"><h3>Create a group</h3><form id="gf"><input name="name" placeholder="Group name" required minlength="3" maxlength="60"><div style="height:8px"></div>
+    <input name="description" placeholder="What is this group about?" maxlength="300"><div style="height:8px"></div><button class="btn" type="submit">Create group</button></form></div>`
+    : '<div class="panel">Log in to create or join groups.</div>';
+  if (me) $("#gf").onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
+    const r = await db.from("groups").insert({ name:f.get("name").trim(), description:f.get("description") || null, owner_id:me.id }).select("id").single();
+    if (r.error) return toast(r.error.message); toast("Group created"); openGroup(r.data.id); };
+  const [g, m] = await Promise.all([
+    db.from("groups").select("id,name,description,group_members(count)").order("created_at",{ascending:false}),
+    me ? db.from("group_members").select("group_id").eq("user_id",me.id) : Promise.resolve({data:[]})]);
+  if (g.error) { $("#gl").innerHTML = `<div class="empty">${esc(g.error.message)}</div>`; return; }
+  const mine = new Set((m.data||[]).map(x => x.group_id));
+  $("#gl").innerHTML = g.data.map(x => { const n = x.group_members?.[0]?.count || 0, j = mine.has(x.id);
+    return `<article class="panel car click" style="padding:14px" onclick="openGroup('${x.id}')"><strong>${esc(x.name)}</strong>
+    <div class="meta">${n} member${n===1?"":"s"}</div><div>${esc(x.description||"")}</div>
+    <div class="row"><button class="btn ${j?"alt":""}" onclick="event.stopPropagation();toggleJoin('${x.id}',${j},'list')">${j?"Joined ✓":"Join"}</button></div></article>`; }).join("")
+    || '<div class="empty">No groups yet. Create the first one.</div>';
+}
+async function toggleJoin(gid, isMember, where){
+  if (!me) { toast("Log in to join groups"); return go("login"); }
+  const r = isMember ? await db.from("group_members").delete().eq("group_id",gid).eq("user_id",me.id)
+                     : await db.from("group_members").insert({ group_id:gid, user_id:me.id });
+  if (r.error) toast(r.error.message);
+  where === "group" ? openGroup(gid, true) : groups();
+}
+async function openGroup(gid, quiet){
+  tab = "groups"; drawNav(); feedRender = null; if (!quiet) push("group", gid);
+  $("#view").innerHTML = '<div class="feedcol"><div id="gh"></div><div id="comp"></div><div id="plist"><div class="empty">Loading...</div></div></div>';
+  const [g, mm, ps] = await Promise.all([
+    db.from("groups").select("id,name,description,group_members(count)").eq("id",gid).single(),
+    me ? db.from("group_members").select("user_id").eq("group_id",gid).eq("user_id",me.id).maybeSingle() : Promise.resolve({data:null}),
+    db.from("posts").select(POST_SEL).eq("group_id",gid).order("created_at",{ascending:false}).limit(50)]);
+  if (g.error) { $("#view").innerHTML = `<div class="empty">${esc(g.error.message)}</div>`; return; }
+  const member = !!mm.data, n = g.data.group_members?.[0]?.count || 0;
+  $("#gh").innerHTML = `<div class="panel"><h2 style="margin:0">${esc(g.data.name)}</h2><div class="meta">${n} member${n===1?"":"s"}</div>
+    <p>${esc(g.data.description || "")}</p><button class="btn ${member?"alt":""}" onclick="toggleJoin('${gid}',${member},'group')">${member ? "Leave group" : "Join group"}</button></div>`;
+  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(g.data.name)}</h3><input id="pf" type="file" accept="image/*"><div style="height:8px"></div>
+    <input id="pc" placeholder="Say something (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="pb">Post photo</button></div>`
+    : '<div class="panel meta">Join this group to post here.</div>';
+  if (member) $("#pb").onclick = async () => {
+    const f = $("#pf").files[0]; if (!f) return toast("Choose a photo first");
+    $("#pb").disabled = true; $("#pb").textContent = "Posting...";
+    const path = `${me.id}/post-${Date.now()}.jpg`;
+    const up = await db.storage.from("vehicle-photos").upload(path, await shrink(f), { contentType:"image/jpeg" });
+    if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, image_path:path }); toast(r.error ? r.error.message : "Posted"); }
+    openGroup(gid, true);
+  };
+  if (ps.error) { $("#plist").innerHTML = `<div class="empty">${esc(ps.error.message)}</div>`; return; }
+  posts = ps.data; drawFeed();
+}
+
+// ---------- Home: group posts (your groups first) mixed with vehicles ----------
+const shuf = a => { a = [...a]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+function homeVeh(c){
+  const img = c.listing_photos?.[0] ? `background-image:url('${photoUrl(c.listing_photos[0].path)}')` : "";
+  return `<article class="car click" style="margin-bottom:14px;display:flex" onclick="openCar('${c.id}')"><div class="pic" style="width:120px;height:auto;min-height:96px;flex:none;${img}"></div>
+  <div class="body"><span class="tag" style="align-self:flex-start">Vehicle for sale</span><div class="price">${fmt(c.price)}</div><strong>${c.year} ${esc(c.make)} ${esc(c.model)}</strong><div class="meta">${esc(c.town)}</div></div></article>`;
+}
+async function home(){
+  feedRender = null;
+  $("#view").innerHTML = '<div class="feedcol"><div id="plist"><div class="empty">Loading your home...</div></div></div>';
+  const [gp, vs, mm] = await Promise.all([
+    db.from("posts").select(POST_SEL).not("group_id","is",null).order("created_at",{ascending:false}).limit(40),
+    db.from("listings").select("*, listing_photos(path), profiles!listings_seller_id_fkey(full_name, role, verified, followers_count, avatar_path)").eq("status","approved").order("created_at",{ascending:false}).limit(20),
+    me ? db.from("group_members").select("group_id").eq("user_id",me.id) : Promise.resolve({data:[]})]);
+  if (gp.error || vs.error) { $("#plist").innerHTML = `<div class="empty">${esc((gp.error || vs.error).message)}</div>`; return; }
+  const mine = new Set((mm.data||[]).map(x => x.group_id));
+  const P = [...shuf(gp.data.filter(p => mine.has(p.group_id))), ...shuf(gp.data.filter(p => !mine.has(p.group_id)))], V = shuf(vs.data);
+  cars = vs.data; const items = [];
+  while (P.length || V.length) {
+    if ((items.length % 3 === 2 && V.length) || !P.length) items.push({ t:"v", c:V.shift() }); else items.push({ t:"p", p:P.shift() });
+  }
+  homeItems = items; posts = items.filter(x => x.t === "p").map(x => x.p);
+  feedRender = () => homeItems.map(x => x.t === "p" ? postHtml(x.p) : homeVeh(x.c)).join("") || '<div class="empty">Nothing here yet. Join a group or post a vehicle.</div>';
+  drawFeed();
 }
 
 // ---------- Install as app ----------
