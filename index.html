@@ -35,6 +35,16 @@ label{display:block;font-size:.85rem;color:var(--mute);margin-bottom:3px}
 .filters{display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:14px}
 .empty{color:var(--mute);padding:24px;text-align:center}
 #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1b2430;color:#fff;padding:10px 16px;border-radius:8px;display:none;z-index:9}
+.chat{display:grid;grid-template-columns:240px 1fr;gap:12px}
+@media(max-width:700px){.chat{grid-template-columns:1fr}}
+.threads button{display:block;width:100%;text-align:left;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:6px;cursor:pointer;font:inherit}
+.threads button.on{border-color:var(--accent);box-shadow:inset 4px 0 0 var(--accent)}
+.msgs{display:flex;flex-direction:column;gap:6px;min-height:220px;max-height:340px;overflow-y:auto;margin-bottom:10px}
+.m{max-width:80%;padding:8px 12px;border-radius:12px;background:var(--bg);border:1px solid var(--line)}
+.m.me{align-self:flex-end;background:var(--accent);color:#1b2430;border-color:transparent}
+.send{display:flex;gap:8px}
+.q{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+.ans{margin:6px 0 0 14px;padding-left:10px;border-left:3px solid var(--green)}
 </style>
 </head>
 <body>
@@ -69,15 +79,16 @@ async function refreshUser(){
 async function logout(){ await db.auth.signOut(); tab="browse"; refreshUser(); }
 
 function drawNav(){
-  const t = {browse:"Browse vehicles"};
+  const t = {browse:"Browse vehicles", mech:"Mechanics & advice"};
   if (me && profile?.role !== "mechanic" && profile?.role !== "buyer") t.sell = "Sell a vehicle";
   if (me && profile?.role === "buyer") t.sell = "Sell a vehicle";
+  if (me) t.chat = "Messages";
   if (profile?.role === "admin") t.admin = "Approve listings";
   if (!me) t.login = "Log in / Sign up";
   $("#nav").innerHTML = Object.entries(t).map(([k,v]) => `<button class="${k===tab?"on":""}" onclick="go('${k}')">${v}</button>`).join("");
 }
 function go(t){ tab=t; drawNav(); render(); }
-function render(){ ({browse, sell, admin, login})[tab](); }
+function render(){ ({browse, sell, admin, login, mech, chat})[tab](); }
 
 // ---------- Browse ----------
 async function browse(){
@@ -106,7 +117,7 @@ function card(c){
   <div class="meta">${esc(c.town)}</div>
   <div><span class="tag ${co?"co":""}">${co?"Company":"Private"}${s.verified?" · Verified":""}</span> ${esc(s.business_name || s.full_name || "")}</div>
   <div class="meta">${esc(c.description||"")}</div>
-  <div class="row">${wa?`<a class="btn wa" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent("Hi, is the "+c.year+" "+c.make+" "+c.model+" still available?")}">WhatsApp</a>`:""}
+  <div class="row"><button class="btn" onclick="openChat('${c.id}','${c.seller_id}')">Chat</button>${wa?`<a class="btn wa" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent("Hi, is the "+c.year+" "+c.make+" "+c.model+" still available?")}">WhatsApp</a>`:""}
   <button class="btn alt" onclick="reportListing('${c.id}')">Report</button></div></div></article>`;
 }
 async function reportListing(id){
@@ -180,6 +191,78 @@ function login(){
     if (error) return toast(error.message);
     if (!data.session) return toast("Check your email to confirm, then log in");
     tab="browse"; refreshUser(); };
+}
+
+// ---------- Chat ----------
+let activeConv = null, chan = null, shown = new Set();
+async function openChat(listingId, sellerId){
+  if (!me) { toast("Log in to chat with the seller"); return go("login"); }
+  if (me.id === sellerId) return toast("This is your own listing");
+  let { data:c } = await db.from("conversations").select("id").eq("listing_id",listingId).eq("buyer_id",me.id).maybeSingle();
+  if (!c) {
+    const r = await db.from("conversations").insert({ listing_id:listingId, buyer_id:me.id, seller_id:sellerId }).select("id").single();
+    if (r.error) return toast(r.error.message);
+    c = r.data;
+  }
+  activeConv = c.id; go("chat");
+}
+function addMsg(m){
+  if (shown.has(m.id)) return; shown.add(m.id);
+  const box = $("#ms"); if (!box) return;
+  const d = document.createElement("div"); d.className = "m" + (m.sender_id===me.id ? " me" : ""); d.textContent = m.body;
+  box.appendChild(d); box.scrollTop = box.scrollHeight;
+}
+async function chat(){
+  if (!me) return go("login");
+  $("#view").innerHTML = '<div class="empty">Loading messages...</div>';
+  const { data:convs, error } = await db.from("conversations")
+    .select("id,buyer_id,seller_id,listings(make,model,year),buyer:profiles!conversations_buyer_id_fkey(full_name),seller:profiles!conversations_seller_id_fkey(full_name)")
+    .order("created_at",{ascending:false});
+  if (error) { $("#view").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
+  if (!convs.length) { $("#view").innerHTML = '<div class="empty">No conversations yet. Open a vehicle and tap Chat to message the seller.</div>'; return; }
+  if (!convs.find(c => c.id === activeConv)) activeConv = convs[0].id;
+  const title = c => { const l=c.listings; const other = me.id===c.buyer_id ? c.seller : c.buyer;
+    return esc((l ? l.year+" "+l.make+" "+l.model : "Vehicle") + " · " + (other?.full_name || "User")); };
+  const { data:ms } = await db.from("messages").select("*").eq("conversation_id",activeConv).order("created_at");
+  shown = new Set(ms.map(m => m.id));
+  const cur = convs.find(c => c.id === activeConv);
+  $("#view").innerHTML = `<div class="chat"><div class="threads">${convs.map(c=>`<button class="${c.id===activeConv?"on":""}" onclick="activeConv='${c.id}';chat()">${title(c)}</button>`).join("")}</div>
+  <div class="panel"><h3>${title(cur)}</h3><div class="msgs" id="ms">${ms.map(m=>`<div class="m ${m.sender_id===me.id?"me":""}">${esc(m.body)}</div>`).join("")}</div>
+  <div class="send"><input id="mi" placeholder="Type a message" maxlength="2000"><button class="btn" id="sb2">Send</button></div></div></div>`;
+  const box = $("#ms"); box.scrollTop = box.scrollHeight;
+  if (chan) db.removeChannel(chan);
+  const id = activeConv;
+  chan = db.channel("m"+id).on("postgres_changes", { event:"INSERT", schema:"public", table:"messages", filter:"conversation_id=eq."+id }, p => addMsg(p.new)).subscribe();
+  const send = async () => { const v=$("#mi").value.trim(); if(!v) return; $("#mi").value="";
+    const r = await db.from("messages").insert({ conversation_id:id, sender_id:me.id, body:v }).select().single();
+    if (r.error) toast(r.error.message); else addMsg(r.data); };
+  $("#sb2").onclick = send; $("#mi").onkeydown = e => { if (e.key==="Enter") send(); };
+}
+
+// ---------- Mechanics & advice ----------
+async function mech(){
+  $("#view").innerHTML = '<div class="empty">Loading...</div>';
+  const [q, m] = await Promise.all([
+    db.from("questions").select("id,body,profiles(full_name),answers(id,body,profiles(full_name,verified))").order("created_at",{ascending:false}),
+    db.from("profiles").select("full_name,business_name,town,verified").eq("role","mechanic")]);
+  if (q.error) { $("#view").innerHTML = `<div class="empty">${esc(q.error.message)}</div>`; return; }
+  const isM = profile?.role === "mechanic";
+  $("#view").innerHTML = `<div class="panel"><h2>Ask a mechanic</h2>
+  <div class="send"><input id="nq" placeholder="Describe the problem, e.g. car overheats in traffic"><button class="btn" id="pq">Post</button></div></div>
+  <div class="panel"><h3>Questions</h3>${q.data.map(x=>`<div class="q"><strong>${esc(x.profiles?.full_name||"User")}</strong><div>${esc(x.body)}</div>
+  ${(x.answers||[]).map(a=>`<div class="ans"><span class="meta">${esc(a.profiles?.full_name||"Mechanic")}${a.profiles?.verified?" · Verified":""}</span><div>${esc(a.body)}</div></div>`).join("")}
+  ${isM?`<div class="send" style="margin-top:8px"><input id="a${x.id}" placeholder="Reply as mechanic"><button class="btn" onclick="answer('${x.id}')">Reply</button></div>`
+        :(x.answers||[]).length?"":'<div class="meta">Waiting for a mechanic to reply.</div>'}</div>`).join("") || '<div class="empty">No questions yet.</div>'}</div>
+  <div class="panel"><h3>Mechanics</h3>${(m.data||[]).map(x=>`<div class="q"><strong>${esc(x.business_name||x.full_name)}</strong>${x.verified?' <span class="tag co">Verified</span>':""}<div class="meta">${esc(x.town||"")}</div></div>`).join("") || '<div class="meta">No mechanics have joined yet.</div>'}</div>`;
+  $("#pq").onclick = async () => {
+    if (!me) { toast("Log in to ask a question"); return go("login"); }
+    const v = $("#nq").value.trim(); if (v.length < 5) return toast("Please describe the problem");
+    const r = await db.from("questions").insert({ author_id:me.id, body:v }); toast(r.error ? r.error.message : "Posted"); mech(); };
+}
+async function answer(qid){
+  const v = $("#a"+qid).value.trim(); if (!v) return;
+  const r = await db.from("answers").insert({ question_id:qid, mechanic_id:me.id, body:v });
+  toast(r.error ? r.error.message : "Reply posted"); mech();
 }
 
 db.auth.onAuthStateChange(() => {});
