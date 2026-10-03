@@ -81,6 +81,18 @@ input,select,textarea{border-radius:10px;background:var(--card);color:var(--ink)
 .un{color:inherit;text-decoration:none;font-weight:700;cursor:pointer}.un:hover{text-decoration:underline}
 .crown{vertical-align:-3px;margin-left:4px}
 .pgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.pgrid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
+
+nav{display:flex;justify-content:space-around;gap:0;padding:0 4px;position:sticky;top:0;z-index:6;overflow-x:auto}
+nav .ic{flex:1;min-width:38px;max-width:84px;background:none;border:0;border-bottom:3px solid transparent;border-radius:0;padding:10px 4px;color:var(--mute);cursor:pointer;display:flex;justify-content:center}
+nav .ic.on{background:none;color:var(--ink);border-bottom-color:var(--accent)}
+nav .ic:hover{color:var(--ink)}
+svg{stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+nav svg,.pick svg{width:24px;height:24px}.bi{width:20px;height:20px}
+.pick{display:inline-flex;align-items:center;gap:8px;cursor:pointer;color:var(--mute);border:1px dashed var(--line);border-radius:10px;padding:8px 12px;max-width:100%}
+.pick:hover{color:var(--ink);border-color:var(--accent)}.pick input{display:none}.pick .pn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip{margin:4px 6px 4px 0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 12px;cursor:pointer;font:inherit}
+.crown{stroke:none}
+.pgrid video{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
 </style>
 </head>
 <body>
@@ -114,16 +126,15 @@ async function refreshUser(){
 async function logout(){ await db.auth.signOut(); tab="home"; refreshUser(); }
 
 function drawNav(){
-  const t = {home:"Home", browse:"Vehicles", feed:"Photo feed", groups:"Groups", mech:"Mechanics & advice"};
-  if (me && profile?.role !== "mechanic" && profile?.role !== "buyer") t.sell = "Sell a vehicle";
-  if (me && profile?.role === "buyer") t.sell = "Sell a vehicle";
-  if (me) t.chat = "Messages";
-  if (profile?.role === "admin") t.admin = "Approve listings";
-  if (!me) t.login = "Log in / Sign up";
-  $("#nav").innerHTML = Object.entries(t).map(([k,v]) => `<button class="${k===tab?"on":""}" onclick="go('${k}')">${v}</button>`).join("");
+  const t = [["home","Home"],["browse","Vehicles"],["feed","Photo feed"],["groups","Groups"],["mech","Mechanics & advice"],["search","Search"]];
+  if (me && profile?.role !== "mechanic") t.push(["sell","Sell a vehicle"]);
+  if (me) t.push(["friends","Friends"],["chat","Messages"]);
+  if (profile?.role === "admin") t.push(["admin","Approve listings"]);
+  if (!me) t.push(["login","Log in or sign up"]);
+  $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}</button>`).join("");
 }
 function go(t, quiet){ tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
-function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups})[tab] || (() => {}))(); }
+function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends})[tab] || (() => {}))(); }
 
 // ---------- Browse ----------
 async function browse(){
@@ -173,10 +184,10 @@ function sell(){
   <div><label>Town</label><input name="town" required placeholder="Nairobi"></div>
   <div><label>WhatsApp number</label><input name="whatsapp" required placeholder="2547XXXXXXXX"></div>
   <div class="w"><label>Description</label><textarea name="description" rows="3"></textarea></div>
-  <div class="w"><label>Photos (1 to 6, real photos of the vehicle)</label><input name="photos" type="file" accept="image/*" multiple required></div>
+  <div class="w"><label>Photos (1 to 6, real photos of the vehicle)</label>${pick("photos","image/*",true,"Add photos")}</div>
   <div class="w"><button class="btn" id="sb" type="submit">Submit listing</button></div></form></div>`;
   $("#sf").onsubmit = async e => {
-    e.preventDefault(); const f = new FormData(e.target); const files = [...e.target.photos.files].slice(0,6);
+    e.preventDefault(); const f = new FormData(e.target); const files = [...e.target.photos.files].slice(0,6); if (!files.length) return toast("Add at least one photo");
     $("#sb").disabled = true; $("#sb").textContent = "Uploading...";
     const { data:l, error } = await db.from("listings").insert({
       seller_id: me.id, make:f.get("make"), model:f.get("model"), year:+f.get("year"), price:+f.get("price"),
@@ -307,17 +318,16 @@ async function feed(){
   feedRender = null;
   $("#view").innerHTML = `<div class="feedcol"><div id="comp"></div><div id="plist"><div class="empty">Loading photos...</div></div></div>`;
   $("#comp").innerHTML = me ? `<div class="panel"><h3>Share a photo</h3>
-    <input id="pf" type="file" accept="image/*"><div style="height:8px"></div>
+    ${pick("pf","image/*,video/*",false,"Add photo or video")}<div style="height:8px"></div>
     <input id="pc" placeholder="Say something about it (optional)" maxlength="500"><div style="height:8px"></div>
     <button class="btn" id="pb">Post photo</button></div>`
     : `<div class="panel">Want to share a photo? <a href="#" onclick="go('login');return false">Log in or sign up</a>.</div>`;
   if (me) $("#pb").onclick = async () => {
     const f = $("#pf").files[0]; if (!f) return toast("Choose a photo first");
     $("#pb").disabled = true; $("#pb").textContent = "Posting...";
-    const blob = await shrink(f), path = `${me.id}/post-${Date.now()}.jpg`;
-    const up = await db.storage.from("vehicle-photos").upload(path, blob, { contentType:"image/jpeg" });
+    const up = await uploadMedia(f);
     if (up.error) { toast(up.error.message); } else {
-      const r = await db.from("posts").insert({ author_id:me.id, caption:$("#pc").value.trim() || null, image_path:path });
+      const r = await db.from("posts").insert({ author_id:me.id, caption:$("#pc").value.trim() || null, image_path:up.path, media_type:up.type });
       toast(r.error ? r.error.message : "Posted");
     }
     feed();
@@ -335,7 +345,7 @@ function postHtml(p){
   const own = me && (me.id === p.author_id || profile?.role === "admin");
   const cs = openC.has(p.id) ? commentsHtml(p.id) : "";
   return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
-  <img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">
+  ${p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
   <div class="body">
   <div class="row acts"><button class="btn alt ${mine===1?"sel":""}" onclick="vote('${p.id}',1)">👍 ${up}</button>
   <button class="btn alt ${mine===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎 ${dn}</button>
@@ -453,11 +463,12 @@ function avatarInner(p){ return p?.avatar_path ? `<img src="${photoUrl(p.avatar_
 async function openProfile(uid, quiet){
   tab = ""; drawNav(); if (!quiet) push("profile", uid); $("#view").innerHTML = '<div class="empty">Loading profile...</div>';
   const mine = !!me && me.id === uid;
-  const [pr, ps, fg, fw] = await Promise.all([
+  const [pr, ps, fg, fw, fr] = await Promise.all([
     db.from("profiles").select("id,full_name,bio,town,business_name,role,verified,avatar_path,followers_count" + (mine ? ",phone" : "")).eq("id",uid).single(),
-    db.from("posts").select("id,image_path").eq("author_id",uid).order("created_at",{ascending:false}).limit(30),
+    db.from("posts").select("id,image_path,media_type").eq("author_id",uid).order("created_at",{ascending:false}).limit(30),
     db.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",uid),
-    me ? db.from("follows").select("follower_id").eq("follower_id",me.id).eq("followee_id",uid).maybeSingle() : Promise.resolve({data:null})]);
+    me ? db.from("follows").select("follower_id").eq("follower_id",me.id).eq("followee_id",uid).maybeSingle() : Promise.resolve({data:null}),
+    me && !mine ? db.from("friendships").select("*").or(`and(requester_id.eq.${me.id},addressee_id.eq.${uid}),and(requester_id.eq.${uid},addressee_id.eq.${me.id})`).maybeSingle() : Promise.resolve({data:null})]);
   if (pr.error) { $("#view").innerHTML = `<div class="empty">${esc(pr.error.message)}</div>`; return; }
   const u = pr.data, following = !!fw.data, n = u.followers_count || 0;
   const next = n < 50 ? `${50-n} more followers for a Bronze crown` : n < 100 ? `${100-n} more for Silver` : n < 1000 ? `${1000-n} more for Gold` : "Gold crown reached";
@@ -466,16 +477,16 @@ async function openProfile(uid, quiet){
     <div class="meta">${esc(u.role)}${u.verified ? " · Verified" : ""}${u.town ? " · " + esc(u.town) : ""}</div></div></div>
     ${u.bio ? `<p>${esc(u.bio)}</p>` : ""}
     <div class="meta"><strong>${n}</strong> followers · <strong>${fg.count || 0}</strong> following · <strong>${ps.data.length}</strong> photos · ${next}</div>
-    ${mine ? "" : `<div class="row"><button class="btn ${following ? "alt" : ""}" onclick="toggleFollow('${uid}',${following})">${following ? "Following ✓" : "Follow"}</button></div>`}</div>
+    ${mine ? "" : `<div class="row"><button class="btn ${following ? "alt" : ""}" onclick="toggleFollow('${uid}',${following})">${following ? "Following ✓" : "Follow"}</button>${friendBtn(fr.data, uid)}</div>`}</div>
     ${mine ? `<div class="panel" style="max-width:640px;margin:0 auto 14px"><h3>Edit profile</h3><form class="f" id="pf2">
       <div><label>Your name</label><input name="full_name" value="${esc(u.full_name)}" required></div>
       <div><label>Business name (companies and mechanics)</label><input name="business_name" value="${esc(u.business_name)}"></div>
       <div><label>Phone</label><input name="phone" value="${esc(u.phone)}"></div>
       <div><label>Town</label><input name="town" value="${esc(u.town)}"></div>
       <div class="w"><label>About you (300 characters)</label><textarea name="bio" rows="3" maxlength="300">${esc(u.bio)}</textarea></div>
-      <div class="w"><label>Profile photo</label><input name="avatar" type="file" accept="image/*"></div>
+      <div class="w"><label>Profile photo</label>${pick("avatar","image/*",false,"Change photo")}</div>
       <div class="w"><button class="btn" id="ps" type="submit">Save profile</button></div></form></div>` : ""}
-    <div style="max-width:640px;margin:0 auto"><h3>Photos</h3><div class="pgrid">${ps.data.map(x => `<img src="${photoUrl(x.image_path)}" loading="lazy" alt="">`).join("") || '<div class="meta">No photos yet.</div>'}</div></div>`;
+    <div style="max-width:640px;margin:0 auto"><h3>Photos</h3><div class="pgrid">${ps.data.map(x => x.media_type === "video" ? `<video src="${photoUrl(x.image_path)}" muted preload="metadata"></video>` : `<img src="${photoUrl(x.image_path)}" loading="lazy" alt="">`).join("") || '<div class="meta">No photos yet.</div>'}</div></div>`;
   if (mine) $("#pf2").onsubmit = async e => {
     e.preventDefault(); const f = new FormData(e.target); $("#ps").disabled = true;
     const upd = { full_name:f.get("full_name"), business_name:f.get("business_name") || null, phone:f.get("phone") || null, town:f.get("town") || null, bio:f.get("bio") || null };
@@ -499,12 +510,12 @@ let depth = 0;
 function upBack(){ const b = document.getElementById("back"); if (b) b.style.display = depth > 0 ? "inline-flex" : "none"; }
 function push(name, arg){ history.pushState({ name, arg, d: ++depth }, ""); upBack(); }
 function goBack(){ if (depth > 0) history.back(); else go("home", true); }
-function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
+function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
 window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; upBack(); if (!st) { go("home", true); return; } restore(st); });
 history.replaceState({ name:"tab", arg:"home", d:0 }, "");
 
 // ---------- Groups ----------
-const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name)";
+const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name),media_type";
 let feedRender = null, homeItems = [];
 async function groups(){
   feedRender = null;
@@ -544,15 +555,14 @@ async function openGroup(gid, quiet){
   const member = !!mm.data, n = g.data.group_members?.[0]?.count || 0;
   $("#gh").innerHTML = `<div class="panel"><h2 style="margin:0">${esc(g.data.name)}</h2><div class="meta">${n} member${n===1?"":"s"}</div>
     <p>${esc(g.data.description || "")}</p><button class="btn ${member?"alt":""}" onclick="toggleJoin('${gid}',${member},'group')">${member ? "Leave group" : "Join group"}</button></div>`;
-  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(g.data.name)}</h3><input id="pf" type="file" accept="image/*"><div style="height:8px"></div>
+  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(g.data.name)}</h3>${pick("pf","image/*,video/*",false,"Add photo or video")}<div style="height:8px"></div>
     <input id="pc" placeholder="Say something (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="pb">Post photo</button></div>`
     : '<div class="panel meta">Join this group to post here.</div>';
   if (member) $("#pb").onclick = async () => {
     const f = $("#pf").files[0]; if (!f) return toast("Choose a photo first");
     $("#pb").disabled = true; $("#pb").textContent = "Posting...";
-    const path = `${me.id}/post-${Date.now()}.jpg`;
-    const up = await db.storage.from("vehicle-photos").upload(path, await shrink(f), { contentType:"image/jpeg" });
-    if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, image_path:path }); toast(r.error ? r.error.message : "Posted"); }
+    const up = await uploadMedia(f);
+    if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, image_path:up.path, media_type:up.type }); toast(r.error ? r.error.message : "Posted"); }
     openGroup(gid, true);
   };
   if (ps.error) { $("#plist").innerHTML = `<div class="empty">${esc(ps.error.message)}</div>`; return; }
@@ -583,6 +593,122 @@ async function home(){
   homeItems = items; posts = items.filter(x => x.t === "p").map(x => x.p);
   feedRender = () => homeItems.map(x => x.t === "p" ? postHtml(x.p) : homeVeh(x.c)).join("") || '<div class="empty">Nothing here yet. Join a group or post a vehicle.</div>';
   drawFeed();
+}
+
+// ---------- Icons ----------
+const _i = d => `<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ICON = {
+ home:_i('<path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>'),
+ browse:_i('<path d="M3 15v-3l2-5h14l2 5v3"/><path d="M3 15h18v3H3z"/><circle cx="7.5" cy="18.5" r="1.6"/><circle cx="16.5" cy="18.5" r="1.6"/>'),
+ feed:_i('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-9 9"/>'),
+ groups:_i('<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.5 0 4 2 4 5"/>'),
+ mech:_i('<path d="M14.7 6.3a4 4 0 0 0-5 5L3 18l3 3 6.7-6.7a4 4 0 0 0 5-5l-2.5 2.5-2.2-.5-.5-2.2z"/>'),
+ search:_i('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>'),
+ sell:_i('<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>'),
+ friends:_i('<circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-6 7-6s7 2.5 7 6"/><path d="M19 8v6M16 11h6"/>'),
+ chat:_i('<path d="M4 5h16v11H9l-5 4z"/>'),
+ admin:_i('<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>'),
+ login:_i('<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.5-7 8-7s8 3 8 7"/>')};
+const pick = (id, accept, multiple, text) => `<label class="pick" title="Choose from your gallery">${ICON.feed}<span class="pn">${text}</span>
+  <input id="${id}" name="${id}" type="file" accept="${accept}" ${multiple ? "multiple" : ""} onchange="this.parentNode.querySelector('.pn').textContent=this.files.length>1?this.files.length+' files selected':(this.files[0]?.name||'${text}')"></label>`;
+async function uploadMedia(f){
+  const vid = f.type.startsWith("video/");
+  if (vid && f.size > 30*1024*1024) return { error:{ message:"Video is too large (maximum 30 MB)" } };
+  const ext = vid ? (f.name.split(".").pop().toLowerCase().replace(/[^a-z0-9]/g,"") || "mp4") : "jpg";
+  const path = `${me.id}/post-${Date.now()}.${ext}`;
+  const up = await db.storage.from("vehicle-photos").upload(path, vid ? f : await shrink(f), { contentType: vid ? f.type : "image/jpeg" });
+  return up.error ? { error:up.error } : { path, type: vid ? "video" : "image" };
+}
+
+// ---------- Search with recent searches ----------
+const recent = () => { try { return JSON.parse(localStorage.getItem("gs-recent") || "[]"); } catch (e) { return []; } };
+function clearRecent(){ try { localStorage.removeItem("gs-recent"); } catch (e) {} search(); }
+function search(){
+  feedRender = null;
+  $("#view").innerHTML = `<div class="feedcol"><form id="sf2" class="send" style="margin-bottom:12px"><input id="sq" placeholder="Search vehicles, people, groups, photos, questions" maxlength="60">
+    <button class="btn" type="submit" aria-label="Search" style="padding:8px 12px">${ICON.search.replace("<svg","<svg class='bi'")}</button></form><div id="sr"></div></div>`;
+  const r = recent();
+  $("#sr").innerHTML = r.length ? `<div class="panel"><h3>Recent searches</h3>${r.map(x => `<button class="chip" data-q="${esc(x)}" onclick="runSearch(this.dataset.q)">🕘 ${esc(x)}</button>`).join("")}<div><button class="lnk" onclick="clearRecent()">Clear recent searches</button></div></div>` : '<div class="empty">Type something to search.</div>';
+  $("#sf2").onsubmit = e => { e.preventDefault(); runSearch($("#sq").value); };
+  $("#sq").focus();
+}
+async function runSearch(q){
+  q = (q || "").trim().replace(/[,()%*\\]/g, " ").trim(); if (q.length < 2) return toast("Type at least 2 letters");
+  $("#sq").value = q;
+  try { localStorage.setItem("gs-recent", JSON.stringify([q, ...recent().filter(x => x !== q)].slice(0, 8))); } catch (e) {}
+  $("#sr").innerHTML = '<div class="empty">Searching...</div>'; const l = `%${q}%`;
+  const [v, u, g, p, qs] = await Promise.all([
+    db.from("listings").select("*, listing_photos(path), profiles!listings_seller_id_fkey(full_name, role, verified, followers_count, avatar_path)").eq("status","approved").or(`make.ilike.${l},model.ilike.${l},town.ilike.${l},description.ilike.${l}`).limit(6),
+    db.from("profiles").select("id,full_name,business_name,avatar_path,followers_count").or(`full_name.ilike.${l},business_name.ilike.${l}`).limit(6),
+    db.from("groups").select("id,name,description,group_members(count)").or(`name.ilike.${l},description.ilike.${l}`).limit(6),
+    db.from("posts").select(POST_SEL).ilike("caption", l).order("created_at",{ascending:false}).limit(10),
+    db.from("questions").select("id,body").ilike("body", l).limit(5)]);
+  cars = v.data || []; posts = p.data || []; feedRender = null;
+  const sec = (title, arr, html) => arr?.length ? `<h3>${title}</h3>${html}` : "";
+  const out = sec("Vehicles", cars, `<div class="grid mini" style="margin-bottom:14px">${cars.map(miniCard).join("")}</div>`)
+    + sec("People", u.data, `<div class="panel">${(u.data||[]).map(o => `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${o.id}')">${avatarInner(o)}</button>${nameLink({full_name:o.business_name||o.full_name,followers_count:o.followers_count},o.id)}</div>`).join("")}</div>`)
+    + sec("Groups", g.data, (g.data||[]).map(x => `<article class="panel car click" onclick="openGroup('${x.id}')"><strong>${esc(x.name)}</strong><div class="meta">${esc(x.description||"")}</div></article>`).join(""))
+    + sec("Questions", qs.data, `<div class="panel">${(qs.data||[]).map(x => `<div class="q"><a href="#" class="un" onclick="go('mech');return false">${esc(x.body)}</a></div>`).join("")}</div>`)
+    + (posts.length ? '<h3>Posts</h3><div id="plist"></div>' : "");
+  $("#sr").innerHTML = out || `<div class="empty">No results for "${esc(q)}".</div>`;
+  if (posts.length) drawFeed();
+}
+
+// ---------- Friends ----------
+const pairFilter = (a, b) => `and(requester_id.eq.${a},addressee_id.eq.${b}),and(requester_id.eq.${b},addressee_id.eq.${a})`;
+function friendBtn(f, uid){
+  if (!f) return `<button class="btn alt" onclick="friendAct('add','${uid}')">Add friend</button>`;
+  if (f.status === "accepted") return `<button class="btn" onclick="openDm('${uid}')">Message</button>`;
+  return f.requester_id === me?.id ? `<button class="btn alt" onclick="friendAct('cancel','${uid}')">Request sent ✕</button>`
+                                   : `<button class="btn" onclick="friendAct('accept','${uid}')">Accept request</button>`;
+}
+async function friendAct(kind, uid){
+  if (!me) { toast("Log in first"); return go("login"); }
+  let r;
+  if (kind === "add") r = await db.from("friendships").insert({ requester_id:me.id, addressee_id:uid });
+  else if (kind === "accept") r = await db.from("friendships").update({ status:"accepted" }).eq("requester_id",uid).eq("addressee_id",me.id);
+  else r = await db.from("friendships").delete().or(pairFilter(me.id, uid));
+  if (r.error) toast(r.error.message); else toast(kind === "add" ? "Friend request sent" : kind === "accept" ? "You are now friends" : "Done");
+  tab === "friends" ? friends() : openProfile(uid, true);
+}
+async function friends(){
+  feedRender = null; if (!me) return go("login");
+  $("#view").innerHTML = '<div class="feedcol"><div class="empty">Loading...</div></div>';
+  const { data, error } = await db.from("friendships").select("requester_id,addressee_id,status,req:profiles!friendships_requester_id_fkey(id,full_name,avatar_path,followers_count),adr:profiles!friendships_addressee_id_fkey(id,full_name,avatar_path,followers_count)")
+    .or(`requester_id.eq.${me.id},addressee_id.eq.${me.id}`);
+  if (error) { $("#view").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
+  const other = f => f.requester_id === me.id ? f.adr : f.req;
+  const row = (f, btns) => { const o = other(f); return `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${o.id}')">${avatarInner(o)}</button><div style="flex:1">${nameLink(o,o.id)}</div>${btns(o)}</div>`; };
+  const inc = data.filter(f => f.status === "pending" && f.addressee_id === me.id), out = data.filter(f => f.status === "pending" && f.requester_id === me.id), fr = data.filter(f => f.status === "accepted");
+  const box = (t, arr, btns, empty) => `<div class="panel"><h3>${t}</h3>${arr.map(f => row(f, btns)).join("") || `<div class="meta">${empty}</div>`}</div>`;
+  $("#view").innerHTML = `<div class="feedcol">
+    ${inc.length ? box("Friend requests", inc, o => `<button class="btn" onclick="friendAct('accept','${o.id}')">Accept</button><button class="btn alt" onclick="friendAct('cancel','${o.id}')">Decline</button>`, "") : ""}
+    ${box("Your friends", fr, o => `<button class="btn" onclick="openDm('${o.id}')">Message</button><button class="btn alt" onclick="if(confirm('Remove this friend?'))friendAct('cancel','${o.id}')">Unfriend</button>`, "No friends yet. Open someone's profile and tap Add friend.")}
+    ${out.length ? box("Requests you sent", out, o => `<button class="btn alt" onclick="friendAct('cancel','${o.id}')">Cancel</button>`, "") : ""}</div>`;
+}
+
+// ---------- Private chat (friends only) ----------
+async function openDm(uid, quiet){
+  if (!me) { toast("Log in to chat"); return go("login"); }
+  tab = "friends"; drawNav(); if (!quiet) push("dm", uid);
+  $("#view").innerHTML = '<div class="empty">Opening chat...</div>';
+  const [a, b] = [me.id, uid].sort();
+  let { data:t } = await db.from("dm_threads").select("id").eq("user_a",a).eq("user_b",b).maybeSingle();
+  if (!t) { const r = await db.from("dm_threads").insert({ user_a:a, user_b:b }).select("id").single();
+    if (r.error) { toast("You can only chat privately with friends"); return go("friends", true); } t = r.data; }
+  const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count").eq("id",uid).single(),
+    db.from("dm_messages").select("*").eq("thread_id",t.id).order("created_at")]);
+  shown = new Set((ms.data||[]).map(m => m.id));
+  $("#view").innerHTML = `<div class="feedcol"><div class="panel"><h3 style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${uid}')">${avatarInner(pr.data)}</button>${nameLink(pr.data,uid)}</h3>
+    <div class="msgs" id="ms">${(ms.data||[]).map(m => `<div class="m ${m.sender_id===me.id?"me":""}">${esc(m.body)}</div>`).join("")}</div>
+    <div class="send"><input id="mi" placeholder="Type a message" maxlength="2000"><button class="btn" id="sb2">Send</button></div></div></div>`;
+  const box = $("#ms"); box.scrollTop = box.scrollHeight;
+  if (chan) db.removeChannel(chan);
+  chan = db.channel("dm"+t.id).on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => addMsg(p.new)).subscribe();
+  const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
+    const r = await db.from("dm_messages").insert({ thread_id:t.id, sender_id:me.id, body:v }).select().single();
+    if (r.error) toast(r.error.message); else addMsg(r.data); };
+  $("#sb2").onclick = send; $("#mi").onkeydown = e => { if (e.key === "Enter") send(); };
 }
 
 // ---------- Install as app ----------
