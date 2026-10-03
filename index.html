@@ -93,11 +93,30 @@ nav svg,.pick svg{width:24px;height:24px}.bi{width:20px;height:20px}
 .chip{margin:4px 6px 4px 0;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:6px 12px;cursor:pointer;font:inherit}
 .crown{stroke:none}
 .pgrid video{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px}
+
+.bar{position:sticky;top:0;z-index:20;background:var(--card);box-shadow:var(--shadow);border-bottom:1px solid var(--line)}
+header{background:var(--card);color:var(--ink);padding:10px 12px 6px;flex-wrap:nowrap}
+header .l,header .r{display:flex;gap:8px;align-items:center}
+.circ{width:40px;height:40px;border-radius:50%;border:0;background:var(--bg);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;overflow:hidden;font:inherit;font-weight:800;font-size:1.1rem}
+.circ svg{width:22px;height:22px}.circ img{width:100%;height:100%;object-fit:cover}.circ.on{box-shadow:0 0 0 2px var(--accent)}
+nav{position:static;box-shadow:none;border-bottom:0;padding:0 4px}
+.menu{position:absolute;right:0;top:48px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);min-width:200px;z-index:40;padding:6px}
+.menu button{display:block;width:100%;text-align:left;background:none;border:0;padding:10px 12px;border-radius:8px;color:var(--ink);font:inherit;cursor:pointer}
+.menu button:hover{background:var(--bg)}
+#sheet{position:fixed;inset:0;z-index:50;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,.45)}
+.sheetbox{background:var(--card);width:100%;max-width:560px;max-height:82vh;border-radius:16px 16px 0 0;display:flex;flex-direction:column;box-shadow:0 -4px 24px rgba(0,0,0,.25)}
+.sheethead{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}
+.sheetlist{overflow-y:auto;padding:4px 14px 10px;flex:1;min-height:120px}
+.sheetin{padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
 </style>
 </head>
 <body>
-<header><div style="display:flex;gap:8px;align-items:center"><button id="back" class="btn alt" style="display:none;color:#fff;border-color:#ffffff55;padding:6px 12px" onclick="goBack()" aria-label="Go back">←</button><h1><span>Gari</span>Soko</h1></div><div style="display:flex;gap:8px;align-items:center"><div id="who"></div><button id="theme" class="btn alt" style="color:#fff;border-color:#ffffff55;padding:6px 10px" aria-label="Switch light or dark mode">🌙</button></div></header>
-<nav id="nav"></nav>
+<div class="bar"><header>
+<div class="l"><button id="back" class="circ" style="display:none" onclick="goBack()" aria-label="Go back">←</button><h1><span>Gari</span>Soko</h1></div>
+<div class="r"><button id="hs" class="circ" onclick="go('search')" aria-label="Search"></button>
+<button id="hi" class="circ" onclick="go('feed')" aria-label="Photos and videos"></button>
+<div style="position:relative"><button id="hp" class="circ" onclick="toggleMenu(event)" aria-label="Profile and settings"></button><div id="menu" class="menu" hidden></div></div></div>
+</header><nav id="nav"></nav></div>
 <main id="view"></main>
 <button id="inst" class="btn" style="display:none;position:fixed;right:14px;bottom:14px;z-index:8">Install app</button>
 <div id="toast" role="status"></div>
@@ -120,20 +139,20 @@ async function refreshUser(){
   const { data:{ user } } = await db.auth.getUser();
   me = user; profile = null;
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
-  $("#who").innerHTML = me ? `<button class="avatar" title="My profile" onclick="openProfile('${me.id}')">${avatarInner(profile)}</button> <button class="btn alt" style="color:#fff;border-color:#ffffff55;padding:6px 10px" onclick="logout()">Log out</button>` : "";
+  $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
   drawNav(); render();
 }
 async function logout(){ await db.auth.signOut(); tab="home"; refreshUser(); }
 
 function drawNav(){
-  const t = [["home","Home"],["browse","Vehicles"],["feed","Photo feed"],["groups","Groups"],["mech","Mechanics & advice"],["search","Search"]];
+  const t = [["home","Home"],["browse","Vehicles"],["groups","Groups"],["mech","Mechanics & advice"]];
   if (me && profile?.role !== "mechanic") t.push(["sell","Sell a vehicle"]);
   if (me) t.push(["friends","Friends"],["chat","Messages"]);
   if (profile?.role === "admin") t.push(["admin","Approve listings"]);
-  if (!me) t.push(["login","Log in or sign up"]);
   $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}</button>`).join("");
+  $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "feed");
 }
-function go(t, quiet){ tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
+function go(t, quiet){ closeSheet(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
 function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends})[tab] || (() => {}))(); }
 
 // ---------- Browse ----------
@@ -343,19 +362,18 @@ function postHtml(p){
   const up = v.filter(x=>x.value===1).length, dn = v.filter(x=>x.value===-1).length;
   const nc = p.post_comments?.[0]?.count || 0;
   const own = me && (me.id === p.author_id || profile?.role === "admin");
-  const cs = openC.has(p.id) ? commentsHtml(p.id) : "";
   return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
   ${p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
   <div class="body">
   <div class="row acts"><button class="btn alt ${mine===1?"sel":""}" onclick="vote('${p.id}',1)">👍 ${up}</button>
   <button class="btn alt ${mine===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎 ${dn}</button>
   <button class="btn alt" onclick="toggleC('${p.id}')">💬 ${nc} comment${nc===1?"":"s"}</button></div>
-  <div>${own?`<button class="lnk" onclick="delPost('${p.id}')">Delete</button>`:`<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div>${cs}</div></article>`;
+  <div>${own?`<button class="lnk" onclick="delPost('${p.id}')">Delete</button>`:`<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div></div></article>`;
 }
 function drawFeed(){
   const y = window.scrollY;
   $("#plist").innerHTML = feedRender ? feedRender() : (posts.map(postHtml).join("") || '<div class="empty">No photos yet. Be the first to post.</div>');
-  window.scrollTo(0, y);
+  window.scrollTo(0, y); drawSheet();
 }
 async function vote(id, val){
   if (!me) { toast("Log in to react"); return go("login"); }
@@ -370,10 +388,22 @@ async function vote(id, val){
   if (r.error) toast(r.error.message);
   drawFeed();
 }
+let sheetId = null;
 async function toggleC(id){
-  if (openC.has(id)) { openC.delete(id); return drawFeed(); }
   const { data } = await db.from("post_comments").select("id,body,created_at,parent_id,author_id,profiles!post_comments_author_id_fkey(full_name,followers_count)").eq("post_id",id).order("created_at");
-  cm[id] = data || []; openC.add(id); drawFeed();
+  cm[id] = data || []; sheetId = id; replyOpen = {}; drawSheet();
+}
+function closeSheet(){ sheetId = null; document.getElementById("sheet")?.remove(); }
+function drawSheet(){
+  let el = document.getElementById("sheet");
+  if (!sheetId) { el?.remove(); return; }
+  const keep = document.getElementById("ci"+sheetId)?.value || "", st = el?.querySelector(".sheetlist")?.scrollTop || 0;
+  if (!el) { el = document.createElement("div"); el.id = "sheet"; el.onclick = e => { if (e.target === el) closeSheet(); }; document.body.appendChild(el); }
+  const n = (cm[sheetId] || []).length;
+  el.innerHTML = `<div class="sheetbox" role="dialog" aria-label="Comments"><div class="sheethead"><strong>Comments (${n})</strong><button class="lnk" style="font-size:1.3rem" onclick="closeSheet()" aria-label="Close comments">✕</button></div>
+    <div class="sheetlist">${commentsHtml(sheetId)}</div>
+    <div class="sheetin send"><input id="ci${sheetId}" placeholder="Write a comment" maxlength="1000"><button class="btn" onclick="addComment('${sheetId}')">Send</button></div></div>`;
+  document.getElementById("ci"+sheetId).value = keep; el.querySelector(".sheetlist").scrollTop = st;
 }
 async function addComment(id, parent){
   if (!me) { toast("Log in to comment"); return go("login"); }
@@ -381,7 +411,7 @@ async function addComment(id, parent){
   const r = await db.from("post_comments").insert({ post_id:id, author_id:me.id, body:v, parent_id:parent||null })
     .select("id,body,created_at,parent_id,author_id,profiles!post_comments_author_id_fkey(full_name,followers_count)").single();
   if (r.error) return toast(r.error.message);
-  cm[id].push(r.data); if (parent) delete replyOpen[parent];
+  box.value = ""; cm[id].push(r.data); if (parent) delete replyOpen[parent];
   const p = posts.find(x => x.id === id);
   p.post_comments = [{ count: (p.post_comments?.[0]?.count || 0) + 1 }]; drawFeed();
 }
@@ -406,14 +436,13 @@ function commentsHtml(pid){
     <button class="lnk" onclick="replyBox('${pid}','${root}','${c.id}')">Reply</button></div>`;
   const list = top.map(c => `<div>${one(c, c.id)}<div class="replies">${all.filter(r => r.parent_id === c.id).map(r => one(r, c.id)).join("")}
     ${c.id in replyOpen ? `<div class="send" style="margin:6px 0"><input id="ri${c.id}" value="${esc(replyOpen[c.id])}" placeholder="Write a reply" maxlength="1000"><button class="btn" onclick="addComment('${pid}','${c.id}')">Send</button></div>` : ""}</div></div>`).join("");
-  return `<div class="q">${list || '<div class="meta">No comments yet.</div>'}
-    <div class="send" style="margin-top:8px"><input id="ci${pid}" placeholder="Write a comment" maxlength="1000"><button class="btn" onclick="addComment('${pid}')">Send</button></div></div>`;
+  return list || '<div class="meta">No comments yet.</div>';
 }
 function replyBox(pid, root, cid){
   if (!me) { toast("Log in to reply"); return go("login"); }
   const c = cm[pid].find(x => x.id === cid);
   replyOpen[root] = c.id === root ? "" : "@" + (c.profiles?.full_name || "") + " ";
-  drawFeed(); const i = document.getElementById("ri"+root); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+  drawSheet(); const i = document.getElementById("ri"+root); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
 
 // ---------- Vehicle preview cards + detail page ----------
@@ -446,10 +475,17 @@ function openCar(id, quiet){
 // ---------- Light / dark mode (light by default) ----------
 function setTheme(t){
   document.documentElement.setAttribute("data-theme", t);
-  $("#theme").textContent = t === "dark" ? "☀️" : "🌙";
   try { localStorage.setItem("gs-theme", t); } catch (e) {}
 }
-$("#theme").onclick = () => setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark");
+function toggleTheme(){ setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"); }
+function toggleMenu(e){
+  e.stopPropagation(); const m = $("#menu"); if (!m.hidden) { m.hidden = true; return; }
+  const dark = document.documentElement.getAttribute("data-theme") === "dark";
+  m.innerHTML = (me ? `<button onclick="openProfile('${me.id}')">My profile</button>` : '<button onclick="go(\'login\')">Log in or sign up</button>')
+    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "");
+  m.hidden = false;
+}
+document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; });
 { let t = "light"; try { t = localStorage.getItem("gs-theme") || "light"; } catch (e) {} setTheme(t); }
 
 // ---------- Crowns, names, avatars ----------
@@ -461,7 +497,7 @@ function avatarInner(p){ return p?.avatar_path ? `<img src="${photoUrl(p.avatar_
 
 // ---------- Profile page ----------
 async function openProfile(uid, quiet){
-  tab = ""; drawNav(); if (!quiet) push("profile", uid); $("#view").innerHTML = '<div class="empty">Loading profile...</div>';
+  closeSheet(); tab = ""; drawNav(); if (!quiet) push("profile", uid); $("#view").innerHTML = '<div class="empty">Loading profile...</div>';
   const mine = !!me && me.id === uid;
   const [pr, ps, fg, fw, fr] = await Promise.all([
     db.from("profiles").select("id,full_name,bio,town,business_name,role,verified,avatar_path,followers_count" + (mine ? ",phone" : "")).eq("id",uid).single(),
@@ -511,60 +547,97 @@ function upBack(){ const b = document.getElementById("back"); if (b) b.style.dis
 function push(name, arg){ history.pushState({ name, arg, d: ++depth }, ""); upBack(); }
 function goBack(){ if (depth > 0) history.back(); else go("home", true); }
 function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
-window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; upBack(); if (!st) { go("home", true); return; } restore(st); });
+window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; closeSheet(); upBack(); if (!st) { go("home", true); return; } restore(st); });
 history.replaceState({ name:"tab", arg:"home", d:0 }, "");
 
 // ---------- Groups ----------
 const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name),media_type";
 let feedRender = null, homeItems = [];
+let gsetOpen = false;
+function joinBtn(gid, st, privacy, where){
+  const label = st === "active" ? (where === "group" ? "Leave group" : "Joined ✓") : st === "pending" ? "Request sent ✕" : privacy === "private" ? "Request to join" : "Join";
+  return `<button class="btn ${st ? "alt" : ""}" onclick="event.stopPropagation();toggleJoin('${gid}','${st || ""}','${privacy}','${where}')">${label}</button>`;
+}
+const lock = pr => pr === "private" ? "🔒 Private group" : "🌐 Public group";
 async function groups(){
   feedRender = null;
   $("#view").innerHTML = '<div class="feedcol"><div id="gc"></div><div id="gl"><div class="empty">Loading groups...</div></div></div>';
   $("#gc").innerHTML = me ? `<div class="panel"><h3>Create a group</h3><form id="gf"><input name="name" placeholder="Group name" required minlength="3" maxlength="60"><div style="height:8px"></div>
-    <input name="description" placeholder="What is this group about?" maxlength="300"><div style="height:8px"></div><button class="btn" type="submit">Create group</button></form></div>`
-    : '<div class="panel">Log in to create or join groups.</div>';
+    <input name="description" placeholder="What is this group about?" maxlength="300"><div style="height:8px"></div>
+    <select name="privacy"><option value="public">Public: anyone can see posts and join</option><option value="private">Private: joining needs approval, only members see posts</option></select><div style="height:8px"></div>
+    <button class="btn" type="submit">Create group</button></form></div>` : '<div class="panel">Log in to create or join groups.</div>';
   if (me) $("#gf").onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
-    const r = await db.from("groups").insert({ name:f.get("name").trim(), description:f.get("description") || null, owner_id:me.id }).select("id").single();
+    const r = await db.from("groups").insert({ name:f.get("name").trim(), description:f.get("description") || null, privacy:f.get("privacy"), owner_id:me.id }).select("id").single();
     if (r.error) return toast(r.error.message); toast("Group created"); openGroup(r.data.id); };
   const [g, m] = await Promise.all([
-    db.from("groups").select("id,name,description,group_members(count)").order("created_at",{ascending:false}),
-    me ? db.from("group_members").select("group_id").eq("user_id",me.id) : Promise.resolve({data:[]})]);
+    db.from("groups").select("id,name,description,privacy,owner_id,group_members(count)").eq("group_members.status","active").order("created_at",{ascending:false}),
+    me ? db.from("group_members").select("group_id,status").eq("user_id",me.id) : Promise.resolve({data:[]})]);
   if (g.error) { $("#gl").innerHTML = `<div class="empty">${esc(g.error.message)}</div>`; return; }
-  const mine = new Set((m.data||[]).map(x => x.group_id));
-  $("#gl").innerHTML = g.data.map(x => { const n = x.group_members?.[0]?.count || 0, j = mine.has(x.id);
+  const mine = new Map((m.data||[]).map(x => [x.group_id, x.status]));
+  $("#gl").innerHTML = g.data.map(x => { const n = x.group_members?.[0]?.count || 0;
     return `<article class="panel car click" style="padding:14px" onclick="openGroup('${x.id}')"><strong>${esc(x.name)}</strong>
-    <div class="meta">${n} member${n===1?"":"s"}</div><div>${esc(x.description||"")}</div>
-    <div class="row"><button class="btn ${j?"alt":""}" onclick="event.stopPropagation();toggleJoin('${x.id}',${j},'list')">${j?"Joined ✓":"Join"}</button></div></article>`; }).join("")
+    <div class="meta">${lock(x.privacy)} · ${n} member${n===1?"":"s"}</div><div>${esc(x.description||"")}</div>
+    <div class="row">${me?.id === x.owner_id ? '<span class="tag">You own this group</span>' : joinBtn(x.id, mine.get(x.id), x.privacy, "list")}</div></article>`; }).join("")
     || '<div class="empty">No groups yet. Create the first one.</div>';
 }
-async function toggleJoin(gid, isMember, where){
+async function toggleJoin(gid, st, privacy, where){
   if (!me) { toast("Log in to join groups"); return go("login"); }
-  const r = isMember ? await db.from("group_members").delete().eq("group_id",gid).eq("user_id",me.id)
-                     : await db.from("group_members").insert({ group_id:gid, user_id:me.id });
-  if (r.error) toast(r.error.message);
+  if (st === "active" && !confirm("Leave this group?")) return;
+  const r = st ? await db.from("group_members").delete().eq("group_id",gid).eq("user_id",me.id)
+               : await db.from("group_members").insert({ group_id:gid, user_id:me.id, status: privacy === "private" ? "pending" : "active" });
+  if (r.error) toast(r.error.message); else if (!st && privacy === "private") toast("Request sent. The owner will review it.");
   where === "group" ? openGroup(gid, true) : groups();
 }
+async function memberAct(gid, uid, kind){
+  const r = kind === "approve" ? await db.from("group_members").update({ status:"active" }).eq("group_id",gid).eq("user_id",uid)
+                               : await db.from("group_members").delete().eq("group_id",gid).eq("user_id",uid);
+  toast(r.error ? r.error.message : "Done"); openGroup(gid, true);
+}
+async function deleteGroup(gid){
+  if (!confirm("Delete this group and all its posts? This cannot be undone.")) return;
+  const r = await db.from("groups").delete().eq("id",gid); if (r.error) return toast(r.error.message);
+  toast("Group deleted"); go("groups");
+}
+function toggleSettings(){ gsetOpen = !gsetOpen; const e = document.getElementById("gset"); if (e) e.hidden = !gsetOpen; }
 async function openGroup(gid, quiet){
-  tab = "groups"; drawNav(); feedRender = null; if (!quiet) push("group", gid);
+  tab = "groups"; drawNav(); feedRender = null; if (!quiet) { push("group", gid); gsetOpen = false; }
   $("#view").innerHTML = '<div class="feedcol"><div id="gh"></div><div id="comp"></div><div id="plist"><div class="empty">Loading...</div></div></div>';
-  const [g, mm, ps] = await Promise.all([
-    db.from("groups").select("id,name,description,group_members(count)").eq("id",gid).single(),
-    me ? db.from("group_members").select("user_id").eq("group_id",gid).eq("user_id",me.id).maybeSingle() : Promise.resolve({data:null}),
-    db.from("posts").select(POST_SEL).eq("group_id",gid).order("created_at",{ascending:false}).limit(50)]);
+  const [g, mm] = await Promise.all([
+    db.from("groups").select("id,name,description,privacy,owner_id,group_members(count)").eq("group_members.status","active").eq("id",gid).single(),
+    me ? db.from("group_members").select("status").eq("group_id",gid).eq("user_id",me.id).maybeSingle() : Promise.resolve({data:null})]);
   if (g.error) { $("#view").innerHTML = `<div class="empty">${esc(g.error.message)}</div>`; return; }
-  const member = !!mm.data, n = g.data.group_members?.[0]?.count || 0;
-  $("#gh").innerHTML = `<div class="panel"><h2 style="margin:0">${esc(g.data.name)}</h2><div class="meta">${n} member${n===1?"":"s"}</div>
-    <p>${esc(g.data.description || "")}</p><button class="btn ${member?"alt":""}" onclick="toggleJoin('${gid}',${member},'group')">${member ? "Leave group" : "Join group"}</button></div>`;
-  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(g.data.name)}</h3>${pick("pf","image/*,video/*",false,"Add photo or video")}<div style="height:8px"></div>
-    <input id="pc" placeholder="Say something (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="pb">Post photo</button></div>`
-    : '<div class="panel meta">Join this group to post here.</div>';
+  const G = g.data, st = mm.data?.status || "", member = st === "active", owner = me?.id === G.owner_id, n = G.group_members?.[0]?.count || 0;
+  const canSee = G.privacy === "public" || member || owner || profile?.role === "admin";
+  let mem = [];
+  if (owner) { const r = await db.from("group_members").select("user_id,status,profiles!group_members_user_id_fkey(full_name,avatar_path,followers_count)").eq("group_id",gid); mem = r.data || []; }
+  const prow = (x, btns) => `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${x.user_id}')">${avatarInner(x.profiles)}</button><div style="flex:1">${nameLink(x.profiles, x.user_id)}</div>${btns}</div>`;
+  const pend = mem.filter(x => x.status === "pending"), act = mem.filter(x => x.status === "active" && x.user_id !== me.id);
+  $("#gh").innerHTML = `<div class="panel"><h2 style="margin:0">${esc(G.name)}</h2><div class="meta">${lock(G.privacy)} · ${n} member${n===1?"":"s"}</div>
+    <p>${esc(G.description || "")}</p><div class="row">${owner ? '<button class="btn alt" onclick="toggleSettings()">⚙ Group settings</button>' : joinBtn(gid, st, G.privacy, "group")}</div></div>
+    ${owner ? `<div class="panel" id="gset" ${gsetOpen ? "" : "hidden"}><h3>Group settings</h3><form class="f" id="gsf">
+      <div class="w"><label>Name</label><input name="name" value="${esc(G.name)}" required minlength="3" maxlength="60"></div>
+      <div class="w"><label>Description</label><textarea name="description" rows="2" maxlength="300">${esc(G.description)}</textarea></div>
+      <div class="w"><label>Privacy</label><select name="privacy"><option value="public">Public: anyone can see posts and join</option><option value="private">Private: joining needs approval, only members see posts</option></select></div>
+      <div class="w"><button class="btn" type="submit">Save settings</button></div></form>
+      <h3>Join requests (${pend.length})</h3>${pend.map(x => prow(x, `<button class="btn" onclick="memberAct('${gid}','${x.user_id}','approve')">Approve</button><button class="btn alt" onclick="memberAct('${gid}','${x.user_id}','remove')">Decline</button>`)).join("") || '<div class="meta">No requests waiting.</div>'}
+      <h3>Members</h3>${act.map(x => prow(x, `<button class="btn alt" onclick="if(confirm('Remove this member?'))memberAct('${gid}','${x.user_id}','remove')">Remove</button>`)).join("") || '<div class="meta">Only you so far.</div>'}
+      <div style="margin-top:12px"><button class="btn bad" onclick="deleteGroup('${gid}')">Delete group</button></div></div>` : ""}`;
+  if (owner) { document.querySelector("#gsf [name=privacy]").value = G.privacy;
+    $("#gsf").onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
+      const r = await db.from("groups").update({ name:f.get("name").trim(), description:f.get("description") || null, privacy:f.get("privacy") }).eq("id",gid);
+      toast(r.error ? r.error.message : "Settings saved"); openGroup(gid, true); }; }
+  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(G.name)}</h3>${pick("pf","image/*,video/*",false,"Add photo or video")}<div style="height:8px"></div>
+    <input id="pc" placeholder="Say something (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="pb">Post</button></div>`
+    : `<div class="panel meta">${canSee ? "Join this group to post here." : "🔒 This is a private group. Request to join to see its posts."}</div>`;
   if (member) $("#pb").onclick = async () => {
-    const f = $("#pf").files[0]; if (!f) return toast("Choose a photo first");
+    const f = $("#pf").files[0]; if (!f) return toast("Choose a photo or video first");
     $("#pb").disabled = true; $("#pb").textContent = "Posting...";
     const up = await uploadMedia(f);
     if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, image_path:up.path, media_type:up.type }); toast(r.error ? r.error.message : "Posted"); }
     openGroup(gid, true);
   };
+  if (!canSee) { $("#plist").innerHTML = ""; return; }
+  const ps = await db.from("posts").select(POST_SEL).eq("group_id",gid).order("created_at",{ascending:false}).limit(50);
   if (ps.error) { $("#plist").innerHTML = `<div class="empty">${esc(ps.error.message)}</div>`; return; }
   posts = ps.data; drawFeed();
 }
@@ -582,7 +655,7 @@ async function home(){
   const [gp, vs, mm] = await Promise.all([
     db.from("posts").select(POST_SEL).not("group_id","is",null).order("created_at",{ascending:false}).limit(40),
     db.from("listings").select("*, listing_photos(path), profiles!listings_seller_id_fkey(full_name, role, verified, followers_count, avatar_path)").eq("status","approved").order("created_at",{ascending:false}).limit(20),
-    me ? db.from("group_members").select("group_id").eq("user_id",me.id) : Promise.resolve({data:[]})]);
+    me ? db.from("group_members").select("group_id").eq("user_id",me.id).eq("status","active") : Promise.resolve({data:[]})]);
   if (gp.error || vs.error) { $("#plist").innerHTML = `<div class="empty">${esc((gp.error || vs.error).message)}</div>`; return; }
   const mine = new Set((mm.data||[]).map(x => x.group_id));
   const P = [...shuf(gp.data.filter(p => mine.has(p.group_id))), ...shuf(gp.data.filter(p => !mine.has(p.group_id)))], V = shuf(vs.data);
@@ -710,6 +783,8 @@ async function openDm(uid, quiet){
     if (r.error) toast(r.error.message); else addMsg(r.data); };
   $("#sb2").onclick = send; $("#mi").onkeydown = e => { if (e.key === "Enter") send(); };
 }
+
+$("#hs").innerHTML = ICON.search; $("#hi").innerHTML = ICON.feed;
 
 // ---------- Install as app ----------
 let deferred = null;
