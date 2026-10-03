@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gari Soko</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--bg:#f3f4f1;--card:#fff;--ink:#1b2430;--mute:#5d6877;--line:#d9dcd6;--accent:#f2b705;--green:#1f7a4d}
+@media (prefers-color-scheme:dark){:root{--bg:#10161e;--card:#1a232e;--ink:#eef0ec;--mute:#9aa5b3;--line:#2c3744;--green:#4cc38a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,sans-serif}
+header{background:#1b2430;color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+h1{margin:0;font-size:1.3rem}h1 span{background:var(--accent);color:#1b2430;padding:0 8px;border-radius:4px;margin-right:6px}
+nav{display:flex;gap:4px;padding:8px 12px;background:var(--card);border-bottom:1px solid var(--line);overflow-x:auto}
+nav button{border:0;background:none;padding:9px 14px;border-radius:99px;cursor:pointer;white-space:nowrap;font-weight:600;color:var(--mute)}
+nav button.on{background:var(--accent);color:#1b2430}
+main{max-width:980px;margin:0 auto;padding:16px}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:10px;width:100%}
+label{display:block;font-size:.85rem;color:var(--mute);margin-bottom:3px}
+.btn{border:0;border-radius:8px;padding:10px 14px;cursor:pointer;font:inherit;font-weight:600;background:var(--accent);color:#1b2430;text-decoration:none;text-align:center;display:inline-block}
+.btn.alt{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.wa{background:#25a244;color:#fff}.btn.bad{background:#b3261e;color:#fff}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:14px}
+.car,.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.panel{padding:14px;margin-bottom:14px}
+.pic{height:170px;background:#2f5d7c center/cover}
+.body{padding:12px;display:flex;flex-direction:column;gap:4px}
+.price{font-weight:800;font-size:1.2rem}.meta{color:var(--mute);font-size:.88rem}
+.tag{font-size:.75rem;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute)}
+.tag.co{border-color:var(--green);color:var(--green)}
+.row{display:flex;gap:8px;margin-top:8px}.row>*{flex:1}
+.f{display:grid;grid-template-columns:1fr 1fr;gap:10px}.f .w{grid-column:1/3}
+@media(max-width:560px){.f{grid-template-columns:1fr}.f .w{grid-column:1}}
+.filters{display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:14px}
+.empty{color:var(--mute);padding:24px;text-align:center}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#1b2430;color:#fff;padding:10px 16px;border-radius:8px;display:none;z-index:9}
+</style>
+</head>
+<body>
+<header><h1><span>Gari</span>Soko</h1><div id="who"></div></header>
+<nav id="nav"></nav>
+<main id="view"></main>
+<div id="toast" role="status"></div>
+<script>
+// ====== STEP 1: PASTE YOUR TWO SUPABASE VALUES BETWEEN THE QUOTES ======
+const SUPABASE_URL = "https://odvraclnvjwlvzrmjxsn.supabase.co";
+const SUPABASE_KEY = "sb_publishable_RkQVJ7BZ6kCSApLunK9fMw_I92Zg7JJ";
+// =======================================================================
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = n => "KSh " + Number(n).toLocaleString("en-KE");
+const photoUrl = p => db.storage.from("vehicle-photos").getPublicUrl(p).data.publicUrl;
+let me = null, profile = null, tab = "browse", cars = [], fq = "", fm = "";
+
+function toast(t){const e=$("#toast");e.textContent=t;e.style.display="block";setTimeout(()=>e.style.display="none",3000)}
+
+async function refreshUser(){
+  const { data:{ user } } = await db.auth.getUser();
+  me = user; profile = null;
+  if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
+  $("#who").innerHTML = me
+    ? `${esc(profile?.full_name || me.email)} (${esc(profile?.role || "")}) <button class="btn alt" style="color:#fff" onclick="logout()">Log out</button>`
+    : "";
+  drawNav(); render();
+}
+async function logout(){ await db.auth.signOut(); tab="browse"; refreshUser(); }
+
+function drawNav(){
+  const t = {browse:"Browse vehicles"};
+  if (me && profile?.role !== "mechanic" && profile?.role !== "buyer") t.sell = "Sell a vehicle";
+  if (me && profile?.role === "buyer") t.sell = "Sell a vehicle";
+  if (profile?.role === "admin") t.admin = "Approve listings";
+  if (!me) t.login = "Log in / Sign up";
+  $("#nav").innerHTML = Object.entries(t).map(([k,v]) => `<button class="${k===tab?"on":""}" onclick="go('${k}')">${v}</button>`).join("");
+}
+function go(t){ tab=t; drawNav(); render(); }
+function render(){ ({browse, sell, admin, login})[tab](); }
+
+// ---------- Browse ----------
+async function browse(){
+  $("#view").innerHTML = '<div class="empty">Loading vehicles...</div>';
+  const { data, error } = await db.from("listings")
+    .select("*, listing_photos(path), profiles(full_name, business_name, role, verified)")
+    .eq("status","approved").order("created_at",{ascending:false});
+  if (error) { $("#view").innerHTML = `<div class="empty">Could not load: ${esc(error.message)}</div>`; return; }
+  cars = data; drawCars(true);
+}
+function drawCars(first){
+  const makes = [...new Set(cars.map(c=>c.make))].sort();
+  const list = cars.filter(c => (c.make+" "+c.model+" "+c.town).toLowerCase().includes(fq.toLowerCase()) && (!fm || c.make===fm));
+  $("#view").innerHTML = `<div class="filters"><input id="fq" placeholder="Search make, model or town" value="${esc(fq)}">
+  <select id="fm"><option value="">All makes</option>${makes.map(m=>`<option ${m===fm?"selected":""}>${esc(m)}</option>`).join("")}</select></div>
+  <div class="grid">${list.map(card).join("") || '<div class="empty">No approved vehicles yet. Be the first to post one.</div>'}</div>`;
+  $("#fq").oninput = e => { fq=e.target.value; const p=e.target.selectionStart; drawCars(); const n=$("#fq"); n.focus(); n.setSelectionRange(p,p); };
+  $("#fm").onchange = e => { fm=e.target.value; drawCars(); };
+}
+function card(c){
+  const img = c.listing_photos?.[0] ? `style="background-image:url('${photoUrl(c.listing_photos[0].path)}')"` : "";
+  const s = c.profiles || {}; const co = s.role === "company";
+  const wa = String(c.whatsapp||"").replace(/\D/g,"");
+  return `<article class="car"><div class="pic" ${img}></div><div class="body">
+  <div class="price">${fmt(c.price)}</div><strong>${c.year} ${esc(c.make)} ${esc(c.model)}</strong>
+  <div class="meta">${esc(c.town)}</div>
+  <div><span class="tag ${co?"co":""}">${co?"Company":"Private"}${s.verified?" · Verified":""}</span> ${esc(s.business_name || s.full_name || "")}</div>
+  <div class="meta">${esc(c.description||"")}</div>
+  <div class="row">${wa?`<a class="btn wa" target="_blank" rel="noopener" href="https://wa.me/${wa}?text=${encodeURIComponent("Hi, is the "+c.year+" "+c.make+" "+c.model+" still available?")}">WhatsApp</a>`:""}
+  <button class="btn alt" onclick="reportListing('${c.id}')">Report</button></div></div></article>`;
+}
+async function reportListing(id){
+  if (!me) { toast("Log in to report a listing"); return go("login"); }
+  const reason = prompt("Why are you reporting this listing?"); if (!reason) return;
+  const { error } = await db.from("reports").insert({ listing_id:id, reporter_id:me.id, reason });
+  toast(error ? error.message : "Thanks, we will check it");
+}
+
+// ---------- Sell ----------
+function sell(){
+  $("#view").innerHTML = `<div class="panel"><h2>List a vehicle for free</h2>
+  <p class="meta">Your ad appears after we check it.</p>
+  <form class="f" id="sf"><div><label>Make</label><input name="make" required placeholder="Toyota"></div>
+  <div><label>Model</label><input name="model" required placeholder="Axio"></div>
+  <div><label>Year</label><input name="year" type="number" min="1980" max="2030" required value="2015"></div>
+  <div><label>Price (KSh)</label><input name="price" type="number" min="1" required></div>
+  <div><label>Town</label><input name="town" required placeholder="Nairobi"></div>
+  <div><label>WhatsApp number</label><input name="whatsapp" required placeholder="2547XXXXXXXX"></div>
+  <div class="w"><label>Description</label><textarea name="description" rows="3"></textarea></div>
+  <div class="w"><label>Photos (1 to 6, real photos of the vehicle)</label><input name="photos" type="file" accept="image/*" multiple required></div>
+  <div class="w"><button class="btn" id="sb" type="submit">Submit listing</button></div></form></div>`;
+  $("#sf").onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target); const files = [...e.target.photos.files].slice(0,6);
+    $("#sb").disabled = true; $("#sb").textContent = "Uploading...";
+    const { data:l, error } = await db.from("listings").insert({
+      seller_id: me.id, make:f.get("make"), model:f.get("model"), year:+f.get("year"), price:+f.get("price"),
+      town:f.get("town"), whatsapp:f.get("whatsapp"), description:f.get("description") }).select().single();
+    if (error) { toast(error.message); $("#sb").disabled=false; $("#sb").textContent="Submit listing"; return; }
+    for (let i=0;i<files.length;i++){
+      const blob = await shrink(files[i]); const path = `${me.id}/${l.id}-${i}.jpg`;
+      const up = await db.storage.from("vehicle-photos").upload(path, blob, {contentType:"image/jpeg"});
+      if (!up.error) await db.from("listing_photos").insert({ listing_id:l.id, path });
+    }
+    toast("Submitted. It will show once approved."); go("browse");
+  };
+}
+function shrink(file){return new Promise(res=>{const img=new Image();img.onload=()=>{const s=Math.min(1,1000/img.width);const c=document.createElement("canvas");c.width=img.width*s;c.height=img.height*s;c.getContext("2d").drawImage(img,0,0,c.width,c.height);c.toBlob(res,"image/jpeg",.8)};img.src=URL.createObjectURL(file)})}
+
+// ---------- Admin ----------
+async function admin(){
+  const { data, error } = await db.from("listings").select("*, listing_photos(path)").eq("status","pending").order("created_at");
+  if (error) { $("#view").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
+  $("#view").innerHTML = data.length ? `<div class="grid">${data.map(c=>card(c).replace(/<div class="row">.*<\/div><\/div><\/article>$/s,
+    `<div class="row"><button class="btn" onclick="decide('${c.id}','approved')">Approve</button><button class="btn bad" onclick="decide('${c.id}','rejected')">Reject</button></div></div></article>`)).join("")}</div>`
+    : '<div class="empty">Nothing waiting for approval.</div>';
+}
+async function decide(id, status){
+  const { error } = await db.from("listings").update({ status }).eq("id", id);
+  toast(error ? error.message : "Listing " + status); admin();
+}
+
+// ---------- Log in / Sign up ----------
+function login(){
+  $("#view").innerHTML = `<div class="panel"><h2>Log in</h2><form class="f" id="lf">
+  <div><label>Email</label><input name="email" type="email" required></div>
+  <div><label>Password</label><input name="password" type="password" required></div>
+  <div class="w"><button class="btn" type="submit">Log in</button></div></form></div>
+  <div class="panel"><h2>New here? Sign up</h2><form class="f" id="sg">
+  <div><label>Your name</label><input name="full_name" required></div>
+  <div><label>Phone</label><input name="phone" placeholder="2547XXXXXXXX"></div>
+  <div><label>Email</label><input name="email" type="email" required></div>
+  <div><label>Password (6+ characters)</label><input name="password" type="password" minlength="6" required></div>
+  <div class="w"><label>I am a</label><select name="role"><option value="buyer">Buyer</option><option value="seller">Private seller</option><option value="company">Company / dealer</option><option value="mechanic">Mechanic</option></select></div>
+  <div class="w"><button class="btn" type="submit">Create account</button></div></form></div>`;
+  $("#lf").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
+    const { error } = await db.auth.signInWithPassword({ email:f.email, password:f.password });
+    if (error) return toast(error.message); tab="browse"; refreshUser(); };
+  $("#sg").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
+    const { data, error } = await db.auth.signUp({ email:f.email, password:f.password, options:{ data:{ full_name:f.full_name, phone:f.phone, role:f.role } } });
+    if (error) return toast(error.message);
+    if (!data.session) return toast("Check your email to confirm, then log in");
+    tab="browse"; refreshUser(); };
+}
+
+db.auth.onAuthStateChange(() => {});
+refreshUser();
+</script>
+</body>
+</html>
