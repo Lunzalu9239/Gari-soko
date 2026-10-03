@@ -153,6 +153,10 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 @keyframes rp{50%{opacity:.25}}
 .mimg{max-width:100%;max-height:300px;border-radius:12px;display:block;margin-bottom:4px;cursor:pointer;background:var(--bg);min-height:60px;min-width:120px}
 .m audio{display:block;width:230px;max-width:100%;height:38px;margin-bottom:6px}
+.ic{position:relative}
+.badge{position:absolute;top:3px;left:calc(50% + 6px);background:#e0443e;color:#fff;font-size:.66rem;font-weight:700;min-width:17px;height:17px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:pop .35s ease}
+.sn{font-size:.74rem;font-weight:700;color:var(--accent);margin-bottom:2px}.m.me .sn{display:none}
+.gp{display:flex;gap:8px;align-items:center;padding:6px 0;cursor:pointer}.gp input{width:auto}
 </style>
 </head>
 <body>
@@ -186,7 +190,7 @@ async function refreshUser(){
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
   if (!booted) { booted = true; if (me) { tab = "chats"; history.replaceState({ name:"tab", arg:"chats", d:0 }, ""); } }
   $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
-  drawNav(); render();
+  drawNav(); render(); if (me) updateBadge(); else unreadN = 0;
 }
 async function logout(){ await db.auth.signOut(); tab="home"; refreshUser(); }
 
@@ -195,7 +199,7 @@ function drawNav(){
   if (me) t.push(["chats","Chats"]);
   t.push(["reels","Reels"],["groups","Groups"]);
   if (me) t.push(["friends","Friends"]);
-  $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}</button>`).join("");
+  $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}${k === "chats" && unreadN ? `<span class="badge">${unreadN > 9 ? "9+" : unreadN}</span>` : ""}</button>`).join("");
   $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "home");
 }
 function go(t, quiet){ closeSheet(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
@@ -320,7 +324,7 @@ async function openChat(listingId, sellerId){
 const hm = t => new Date(t).toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" });
 const bubble = m => {
   const md = m.media_path ? (m.media_type === "audio" ? `<audio controls preload="none" data-p="${esc(m.media_path)}"></audio>` : `<img class="mimg" alt="Photo" data-p="${esc(m.media_path)}" onclick="if(this.src)window.open(this.src)">`) : "";
-  return `<div class="m ${m.sender_id === me.id ? "me" : ""}">${md}${m.body ? esc(m.body) : ""}<span class="bt">${hm(m.created_at)}</span></div>`;
+  return `<div class="m ${m.sender_id === me.id ? "me" : ""}">${bnames && m.sender_id !== me.id ? `<div class="sn">${esc(bnames[m.sender_id] || "User")}</div>` : ""}${md}${m.body ? esc(m.body) : ""}<span class="bt">${hm(m.created_at)}</span></div>`;
 };
 function addMsg(m){
   if (shown.has(m.id)) return; shown.add(m.id);
@@ -597,7 +601,7 @@ let depth = 0;
 function upBack(){ const b = document.getElementById("back"); if (b) b.style.display = depth > 0 ? "inline-flex" : "none"; }
 function push(name, arg){ history.pushState({ name, arg, d: ++depth }, ""); upBack(); }
 function goBack(){ if (depth > 0) history.back(); else go(me ? "chats" : "home", true); }
-function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
+function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), gc:()=>openGc(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
 window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; closeSheet(); upBack(); if (!st) { go(me ? "chats" : "home", true); return; } restore(st); });
 history.replaceState({ name:"tab", arg:"home", d:0 }, "");
 
@@ -846,7 +850,7 @@ async function openDm(uid, quiet){
     if (r.error) { toast("You can only chat privately with friends"); return go("friends", true); } t = r.data; }
   const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count,verified").eq("id",uid).single(),
     db.from("dm_messages").select("*").eq("thread_id",t.id).order("created_at")]);
-  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curThread = t.id;
+  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curKind = "dm"; bnames = null; curThread = t.id;
   $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><button class="avatar" onclick="openProfile('${uid}')">${avatarInner(pr.data)}</button>
     <div><div style="font-weight:700">${nameLink(pr.data,uid)}</div><div class="meta">Private chat</div></div></div>
     <div class="msgs" id="ms">${(ms.data||[]).map(bubble).join("")}</div>
@@ -879,28 +883,44 @@ ICON.reels = _i('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9
 ICON.send = _i('<path d="M22 3L11 14"/><path d="M22 3l-7 19-4-8-8-4z"/>');
 const seen = () => { try { return JSON.parse(localStorage.getItem("gs-seen") || "{}"); } catch (e) { return {}; } };
 function markSeen(id){ try { const o = seen(); o[id] = Date.now(); localStorage.setItem("gs-seen", JSON.stringify(o)); } catch (e) {} }
+let unreadN = 0, curKind = "dm", bnames = null;
+async function loadInbox(){
+  const P = "id,full_name,avatar_path,followers_count,verified";
+  const [dt, cv, gc] = await Promise.all([
+    db.from("dm_threads").select(`id,user_a,user_b,created_at,a:profiles!dm_threads_user_a_fkey(${P}),b:profiles!dm_threads_user_b_fkey(${P})`),
+    db.from("conversations").select(`id,buyer_id,seller_id,created_at,listings(make,model,year),buyer:profiles!conversations_buyer_id_fkey(${P}),seller:profiles!conversations_seller_id_fkey(${P})`),
+    db.from("gchats").select("id,name,created_at,gchat_members(count)")]);
+  const err = dt.error || cv.error || gc.error; if (err) return { error:err };
+  const ids = a => a.data.map(x => x.id);
+  const [dm, cm2, gm] = await Promise.all([
+    dt.data.length ? db.from("dm_messages").select("thread_id,body,sender_id,created_at,media_type").in("thread_id", ids(dt)).order("created_at",{ascending:false}).limit(300) : { data:[] },
+    cv.data.length ? db.from("messages").select("conversation_id,body,sender_id,created_at").in("conversation_id", ids(cv)).order("created_at",{ascending:false}).limit(300) : { data:[] },
+    gc.data.length ? db.from("gchat_messages").select("chat_id,body,sender_id,created_at,media_type,profiles!gchat_messages_sender_id_fkey(full_name)").in("chat_id", ids(gc)).order("created_at",{ascending:false}).limit(300) : { data:[] }]);
+  const lastBy = (r, k) => { const o = {}; (r.data || []).forEach(m => { if (!o[m[k]]) o[m[k]] = m; }); return o; };
+  const ld = lastBy(dm, "thread_id"), lc = lastBy(cm2, "conversation_id"), lg = lastBy(gm, "chat_id"), sn = seen();
+  const prev = l => l.body || (l.media_type === "audio" ? "🎤 Voice note" : "📷 Photo");
+  const you = l => l.sender_id === me.id ? "You: " : "";
+  const mk = (id, o, l, created, who, extra) => ({ key:id, p:o, name:o?.full_name || "User", sub: l ? who(l) + prev(l) : "Say hello 👋", time:l?.created_at || created,
+    unread: !!l && l.sender_id !== me.id && new Date(l.created_at).getTime() > (sn[id] || 0), ...extra });
+  inbox = [
+    ...dt.data.map(x => { const o = x.user_a === me.id ? x.b : x.a; return mk(x.id, o, ld[x.id], x.created_at, you, { open:`openDm('${o.id}')` }); }),
+    ...cv.data.map(x => { const o = x.buyer_id === me.id ? x.seller : x.buyer, car = x.listings ? `${x.listings.year} ${x.listings.make} ${x.listings.model}` : "Vehicle";
+      return mk(x.id, o, lc[x.id], x.created_at, you, { tag:"🚗 " + car, open:`activeConv='${x.id}';go('chat')` }); }),
+    ...gc.data.map(x => { const n = x.gchat_members?.[0]?.count || 0;
+      return mk(x.id, { full_name:x.name }, lg[x.id], x.created_at, l => l.sender_id === me.id ? "You: " : ((l.profiles?.full_name || "").split(" ")[0] + ": "), { name:x.name, tag:`👥 Group · ${n} member${n===1?"":"s"}`, open:`openGc('${x.id}')` }); })
+  ].sort((a, b) => new Date(b.time) - new Date(a.time));
+  unreadN = inbox.filter(x => x.unread).length; drawNav();
+  return {};
+}
+async function updateBadge(){ try { await loadInbox(); } catch (e) {} }
+setInterval(() => { if (me && !document.hidden) updateBadge(); }, 45000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && me) updateBadge(); });
 async function chats(){
   feedRender = null; if (!me) return go("login");
   $("#view").innerHTML = `<div class="feedcol"><div class="send" style="margin-bottom:10px"><input id="cq" placeholder="Search chats">
     <button class="btn" onclick="newChat()" aria-label="Start a new chat" style="padding:8px 12px">${ICON.friends.replace("<svg","<svg class='bi'")}</button></div><div id="nc"></div><div id="cl"><div class="empty">Loading chats...</div></div></div>`;
   $("#cq").oninput = drawInbox;
-  const P = "id,full_name,avatar_path,followers_count,verified";
-  const [dt, cv] = await Promise.all([
-    db.from("dm_threads").select(`id,user_a,user_b,created_at,a:profiles!dm_threads_user_a_fkey(${P}),b:profiles!dm_threads_user_b_fkey(${P})`),
-    db.from("conversations").select(`id,buyer_id,seller_id,created_at,listings(make,model,year),buyer:profiles!conversations_buyer_id_fkey(${P}),seller:profiles!conversations_seller_id_fkey(${P})`)]);
-  if (dt.error || cv.error) { $("#cl").innerHTML = `<div class="empty">${esc((dt.error || cv.error).message)}</div>`; return; }
-  const [dm, cm2] = await Promise.all([
-    dt.data.length ? db.from("dm_messages").select("thread_id,body,sender_id,created_at,media_type").in("thread_id", dt.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] },
-    cv.data.length ? db.from("messages").select("conversation_id,body,sender_id,created_at").in("conversation_id", cv.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] }]);
-  const lastBy = (r, k) => { const o = {}; (r.data || []).forEach(m => { if (!o[m[k]]) o[m[k]] = m; }); return o; };
-  const ld = lastBy(dm, "thread_id"), lc = lastBy(cm2, "conversation_id"), sn = seen();
-  const mk = (id, o, l, created, extra) => ({ key:id, p:o, name:o?.full_name || "User", sub: l ? (l.sender_id === me.id ? "You: " : "") + (l.body || (l.media_type === "audio" ? "🎤 Voice note" : "📷 Photo")) : "Say hello 👋", time:l?.created_at || created,
-    unread: !!l && l.sender_id !== me.id && new Date(l.created_at).getTime() > (sn[id] || 0), ...extra });
-  inbox = [
-    ...dt.data.map(x => { const o = x.user_a === me.id ? x.b : x.a; return mk(x.id, o, ld[x.id], x.created_at, { open:`openDm('${o.id}')` }); }),
-    ...cv.data.map(x => { const o = x.buyer_id === me.id ? x.seller : x.buyer, car = x.listings ? `${x.listings.year} ${x.listings.make} ${x.listings.model}` : "Vehicle";
-      return mk(x.id, o, lc[x.id], x.created_at, { tag:"🚗 " + car, open:`activeConv='${x.id}';go('chat')` }); })
-  ].sort((a, b) => new Date(b.time) - new Date(a.time));
+  const r = await loadInbox(); if (r.error) { $("#cl").innerHTML = `<div class="empty">${esc(r.error.message)}</div>`; return; }
   drawInbox();
 }
 function drawInbox(){
@@ -918,7 +938,50 @@ async function newChat(){
     .eq("status","accepted").or(`requester_id.eq.${me.id},addressee_id.eq.${me.id}`);
   const fr = (data || []).map(f => f.requester_id === me.id ? f.adr : f.req);
   box.innerHTML = `<div class="panel"><h3>Start a chat</h3>${fr.map(o => `<div class="q" style="display:flex;gap:10px;align-items:center;cursor:pointer" onclick="openDm('${o.id}')"><span class="avatar sm">${avatarInner(o)}</span><div style="flex:1">${esc(o.full_name)}${tick(o.verified)}</div></div>`).join("")
-    || '<div class="meta">You have no friends yet. <a href="#" class="un" onclick="go(\'friends\');return false">Find people</a> and send a friend request.</div>'}</div>`;
+    || '<div class="meta">You have no friends yet. <a href="#" class="un" onclick="go(\'friends\');return false">Find people</a> and send a friend request.</div>'}</div>
+    ${fr.length ? `<div class="panel"><h3>New group chat</h3><input id="gn" placeholder="Group name" maxlength="60"><div style="height:8px"></div>
+    ${fr.map(o => `<label class="gp"><input type="checkbox" class="gpick" value="${o.id}"> ${esc(o.full_name)}</label>`).join("")}
+    <div style="height:8px"></div><button class="btn" onclick="createGc()">Create group chat</button></div>` : ""}`;
+}
+async function createGc(){
+  const name = $("#gn").value.trim(), ids = [...document.querySelectorAll(".gpick:checked")].map(x => x.value);
+  if (name.length < 2) return toast("Give the group a name"); if (!ids.length) return toast("Pick at least one friend");
+  const r = await db.from("gchats").insert({ name, created_by:me.id }).select("id").single(); if (r.error) return toast(r.error.message);
+  const m = await db.from("gchat_members").insert(ids.map(u => ({ chat_id:r.data.id, user_id:u }))); if (m.error) toast(m.error.message);
+  openGc(r.data.id);
+}
+async function leaveGc(id){
+  if (!confirm("Leave this group chat?")) return;
+  const r = await db.from("gchat_members").delete().eq("chat_id",id).eq("user_id",me.id);
+  if (r.error) return toast(r.error.message); toast("You left the group"); go("chats");
+}
+async function openGc(id, quiet){
+  if (!me) { toast("Log in to chat"); return go("login"); }
+  closeSheet(); tab = "chats"; drawNav(); if (!quiet) push("gc", id);
+  $("#view").innerHTML = '<div class="empty">Opening group chat...</div>';
+  const [g, mem, ms] = await Promise.all([
+    db.from("gchats").select("id,name").eq("id",id).single(),
+    db.from("gchat_members").select("user_id,profiles!gchat_members_user_id_fkey(full_name)").eq("chat_id",id),
+    db.from("gchat_messages").select("*").eq("chat_id",id).order("created_at")]);
+  if (g.error) { toast("This group chat is not available"); return go("chats", true); }
+  bnames = {}; (mem.data || []).forEach(x => { bnames[x.user_id] = x.profiles?.full_name || "User"; });
+  curThread = id; curKind = "gc"; shown = new Set((ms.data || []).map(m => m.id)); markSeen(id);
+  const names = Object.values(bnames).join(", ");
+  $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><span class="avatar" style="cursor:default">${esc(g.data.name.charAt(0).toUpperCase())}</span>
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(g.data.name)}</div><div class="meta csub">${esc(names)}</div></div><button class="lnk" onclick="leaveGc('${id}')">Leave</button></div>
+    <div class="msgs" id="ms">${(ms.data || []).map(bubble).join("")}</div>
+    <div class="cin" id="cin"><div class="norm"><label class="iconbtn" title="Send a photo">${ICON.feed}<input type="file" accept="image/*" hidden onchange="sendPhoto(this)"></label>
+    <input id="mi" placeholder="Message" maxlength="2000" autocomplete="off"><button class="iconbtn" aria-label="Record a voice note" onclick="recStart()">${ICON.mic}</button>
+    <button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div>
+    <div class="recbar"><span class="recdot"></span><span id="rt">0:00</span><span class="meta" style="flex:1">Recording...</span>
+    <button class="iconbtn" onclick="recStop(false)" aria-label="Cancel">✕</button><button class="sendbtn" onclick="recStop(true)" aria-label="Send voice note">${ICON.send}</button></div></div></div></div>`;
+  const box = $("#ms"); box.scrollTop = box.scrollHeight; hydrate(box);
+  if (chan) db.removeChannel(chan);
+  chan = db.channel("gc"+id).on("postgres_changes", { event:"INSERT", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => { addMsg(p.new); markSeen(id); }).subscribe();
+  const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
+    const r = await db.from("gchat_messages").insert({ chat_id:id, sender_id:me.id, body:v }).select().single();
+    if (r.error) toast(r.error.message); else addMsg(r.data); };
+  $("#sb2").onclick = send; $("#mi").onkeydown = e => { if (e.key === "Enter") send(); };
 }
 
 // ---------- Photos and voice notes in private chats ----------
@@ -936,7 +999,7 @@ async function sendMedia(blob, type, kind){
   const path = `${me.id}/${Date.now()}.${ext}`;
   const up = await db.storage.from("chat-media").upload(path, blob, { contentType:type });
   if (up.error) return toast(up.error.message);
-  const r = await db.from("dm_messages").insert({ thread_id:curThread, sender_id:me.id, body:"", media_path:path, media_type:kind }).select().single();
+  const gcm = curKind === "gc"; const r = await db.from(gcm ? "gchat_messages" : "dm_messages").insert({ [gcm ? "chat_id" : "thread_id"]:curThread, sender_id:me.id, body:"", media_path:path, media_type:kind }).select().single();
   if (r.error) toast(r.error.message); else addMsg(r.data);
 }
 async function sendPhoto(inp){
