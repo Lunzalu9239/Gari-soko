@@ -109,6 +109,10 @@ nav{position:static;box-shadow:none;border-bottom:0;padding:0 4px}
 .sheetlist{overflow-y:auto;padding:4px 14px 10px;flex:1;min-height:120px}
 .sheetin{padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line)}
 .vt{vertical-align:-3px;margin-left:3px}
+.crow{display:flex;gap:12px;align-items:center;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:8px;cursor:pointer;box-shadow:var(--shadow)}
+.crow .avatar{width:46px;height:46px;cursor:pointer}.cbody{flex:1;min-width:0}.ctop{display:flex;gap:6px;align-items:center}.ctop .meta{margin-left:auto}
+.csub{color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crow.unread .csub{font-weight:700;color:var(--ink)}
+.dot{width:10px;height:10px;border-radius:50%;background:#1d9bf0;flex:none}
 </style>
 </head>
 <body>
@@ -140,21 +144,23 @@ async function refreshUser(){
   const { data:{ user } } = await db.auth.getUser();
   me = user; profile = null;
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
+  if (!booted) { booted = true; if (me) { tab = "chats"; history.replaceState({ name:"tab", arg:"chats", d:0 }, ""); } }
   $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
   drawNav(); render();
 }
 async function logout(){ await db.auth.signOut(); tab="home"; refreshUser(); }
 
 function drawNav(){
-  const t = [["home","Home"],["browse","Vehicles"],["groups","Groups"],["mech","Mechanics & advice"]];
+  const t = me ? [["chats","Chats"]] : [];
+  t.push(["home","Home"],["browse","Vehicles"],["groups","Groups"],["mech","Mechanics & advice"]);
   if (me && profile?.role !== "mechanic") t.push(["sell","Sell a vehicle"]);
-  if (me) t.push(["friends","Friends"],["chat","Messages"]);
+  if (me) t.push(["friends","Friends"]);
   if (profile?.role === "admin") t.push(["admin","Approve listings"]);
   $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}</button>`).join("");
   $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "feed");
 }
 function go(t, quiet){ closeSheet(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
-function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends})[tab] || (() => {}))(); }
+function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends, chats})[tab] || (() => {}))(); }
 
 // ---------- Browse ----------
 async function browse(){
@@ -251,12 +257,12 @@ function login(){
   <div class="w"><button class="btn" type="submit">Create account</button></div></form></div>`;
   $("#lf").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
     const { error } = await db.auth.signInWithPassword({ email:f.email, password:f.password });
-    if (error) return toast(error.message); tab="home"; refreshUser(); };
+    if (error) return toast(error.message); tab="chats"; refreshUser(); };
   $("#sg").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
     const { data, error } = await db.auth.signUp({ email:f.email, password:f.password, options:{ data:{ full_name:f.full_name, phone:f.phone, role:f.role } } });
     if (error) return toast(error.message);
     if (!data.session) return toast("Check your email to confirm, then log in");
-    tab="home"; refreshUser(); };
+    tab="chats"; refreshUser(); };
 }
 
 // ---------- Chat ----------
@@ -286,7 +292,7 @@ async function chat(){
     .order("created_at",{ascending:false});
   if (error) { $("#view").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
   if (!convs.length) { $("#view").innerHTML = '<div class="empty">No conversations yet. Open a vehicle and tap Chat to message the seller.</div>'; return; }
-  if (!convs.find(c => c.id === activeConv)) activeConv = convs[0].id;
+  if (!convs.find(c => c.id === activeConv)) activeConv = convs[0].id; markSeen(activeConv);
   const title = c => { const l=c.listings; const other = me.id===c.buyer_id ? c.seller : c.buyer;
     return esc((l ? l.year+" "+l.make+" "+l.model : "Vehicle") + " · " + (other?.full_name || "User")); };
   const { data:ms } = await db.from("messages").select("*").eq("conversation_id",activeConv).order("created_at");
@@ -547,9 +553,9 @@ async function toggleFollow(uid, isFollowing){
 let depth = 0;
 function upBack(){ const b = document.getElementById("back"); if (b) b.style.display = depth > 0 ? "inline-flex" : "none"; }
 function push(name, arg){ history.pushState({ name, arg, d: ++depth }, ""); upBack(); }
-function goBack(){ if (depth > 0) history.back(); else go("home", true); }
+function goBack(){ if (depth > 0) history.back(); else go(me ? "chats" : "home", true); }
 function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
-window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; closeSheet(); upBack(); if (!st) { go("home", true); return; } restore(st); });
+window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; closeSheet(); upBack(); if (!st) { go(me ? "chats" : "home", true); return; } restore(st); });
 history.replaceState({ name:"tab", arg:"home", d:0 }, "");
 
 // ---------- Groups ----------
@@ -773,13 +779,13 @@ async function openDm(uid, quiet){
     if (r.error) { toast("You can only chat privately with friends"); return go("friends", true); } t = r.data; }
   const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count,verified").eq("id",uid).single(),
     db.from("dm_messages").select("*").eq("thread_id",t.id).order("created_at")]);
-  shown = new Set((ms.data||[]).map(m => m.id));
+  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id);
   $("#view").innerHTML = `<div class="feedcol"><div class="panel"><h3 style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${uid}')">${avatarInner(pr.data)}</button>${nameLink(pr.data,uid)}</h3>
     <div class="msgs" id="ms">${(ms.data||[]).map(m => `<div class="m ${m.sender_id===me.id?"me":""}">${esc(m.body)}</div>`).join("")}</div>
     <div class="send"><input id="mi" placeholder="Type a message" maxlength="2000"><button class="btn" id="sb2">Send</button></div></div></div>`;
   const box = $("#ms"); box.scrollTop = box.scrollHeight;
   if (chan) db.removeChannel(chan);
-  chan = db.channel("dm"+t.id).on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => addMsg(p.new)).subscribe();
+  chan = db.channel("dm"+t.id).on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => { addMsg(p.new); markSeen(t.id); }).subscribe();
   const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
     const r = await db.from("dm_messages").insert({ thread_id:t.id, sender_id:me.id, body:v }).select().single();
     if (r.error) toast(r.error.message); else addMsg(r.data); };
@@ -792,6 +798,53 @@ $("#hs").innerHTML = ICON.search; $("#hi").innerHTML = ICON.feed;
 const vidObs = new IntersectionObserver(es => es.forEach(e => { if (e.intersectionRatio < 0.4) e.target.pause(); }), { threshold:[0, 0.4, 1] });
 function watchVideos(){ document.querySelectorAll("video.pimg").forEach(v => vidObs.observe(v)); }
 document.addEventListener("play", e => { if (e.target.tagName === "VIDEO") document.querySelectorAll("video").forEach(v => { if (v !== e.target) v.pause(); }); }, true);
+
+// ---------- Chats inbox (the home screen of the chat app) ----------
+let booted = false, inbox = [];
+ICON.chats = ICON.chat;
+const seen = () => { try { return JSON.parse(localStorage.getItem("gs-seen") || "{}"); } catch (e) { return {}; } };
+function markSeen(id){ try { const o = seen(); o[id] = Date.now(); localStorage.setItem("gs-seen", JSON.stringify(o)); } catch (e) {} }
+async function chats(){
+  feedRender = null; if (!me) return go("login");
+  $("#view").innerHTML = `<div class="feedcol"><div class="send" style="margin-bottom:10px"><input id="cq" placeholder="Search chats">
+    <button class="btn" onclick="newChat()" aria-label="Start a new chat" style="padding:8px 12px">${ICON.friends.replace("<svg","<svg class='bi'")}</button></div><div id="nc"></div><div id="cl"><div class="empty">Loading chats...</div></div></div>`;
+  $("#cq").oninput = drawInbox;
+  const P = "id,full_name,avatar_path,followers_count,verified";
+  const [dt, cv] = await Promise.all([
+    db.from("dm_threads").select(`id,user_a,user_b,created_at,a:profiles!dm_threads_user_a_fkey(${P}),b:profiles!dm_threads_user_b_fkey(${P})`),
+    db.from("conversations").select(`id,buyer_id,seller_id,created_at,listings(make,model,year),buyer:profiles!conversations_buyer_id_fkey(${P}),seller:profiles!conversations_seller_id_fkey(${P})`)]);
+  if (dt.error || cv.error) { $("#cl").innerHTML = `<div class="empty">${esc((dt.error || cv.error).message)}</div>`; return; }
+  const [dm, cm2] = await Promise.all([
+    dt.data.length ? db.from("dm_messages").select("thread_id,body,sender_id,created_at").in("thread_id", dt.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] },
+    cv.data.length ? db.from("messages").select("conversation_id,body,sender_id,created_at").in("conversation_id", cv.data.map(x => x.id)).order("created_at",{ascending:false}).limit(300) : { data:[] }]);
+  const lastBy = (r, k) => { const o = {}; (r.data || []).forEach(m => { if (!o[m[k]]) o[m[k]] = m; }); return o; };
+  const ld = lastBy(dm, "thread_id"), lc = lastBy(cm2, "conversation_id"), sn = seen();
+  const mk = (id, o, l, created, extra) => ({ key:id, p:o, name:o?.full_name || "User", sub: l ? (l.sender_id === me.id ? "You: " : "") + l.body : "Say hello 👋", time:l?.created_at || created,
+    unread: !!l && l.sender_id !== me.id && new Date(l.created_at).getTime() > (sn[id] || 0), ...extra });
+  inbox = [
+    ...dt.data.map(x => { const o = x.user_a === me.id ? x.b : x.a; return mk(x.id, o, ld[x.id], x.created_at, { open:`openDm('${o.id}')` }); }),
+    ...cv.data.map(x => { const o = x.buyer_id === me.id ? x.seller : x.buyer, car = x.listings ? `${x.listings.year} ${x.listings.make} ${x.listings.model}` : "Vehicle";
+      return mk(x.id, o, lc[x.id], x.created_at, { tag:"🚗 " + car, open:`activeConv='${x.id}';go('chat')` }); })
+  ].sort((a, b) => new Date(b.time) - new Date(a.time));
+  drawInbox();
+}
+function drawInbox(){
+  const q = ($("#cq")?.value || "").toLowerCase();
+  const list = inbox.filter(x => (x.name + " " + (x.tag || "")).toLowerCase().includes(q));
+  $("#cl").innerHTML = list.map(x => `<div class="crow ${x.unread ? "unread" : ""}" onclick="${x.open}"><div class="avatar">${avatarInner(x.p)}</div>
+    <div class="cbody"><div class="ctop"><strong>${esc(x.name)}</strong>${tick(x.p?.verified)}<span class="meta">${ago(x.time)}</span></div>
+    ${x.tag ? `<div class="meta">${esc(x.tag)}</div>` : ""}<div class="csub">${esc(x.sub)}</div></div>${x.unread ? '<span class="dot"></span>' : ""}</div>`).join("")
+    || '<div class="empty">No chats yet. Tap the people icon to start one with a friend, or tap Chat on a vehicle.</div>';
+}
+async function newChat(){
+  const box = $("#nc"); if (box.innerHTML) { box.innerHTML = ""; return; }
+  box.innerHTML = '<div class="panel">Loading friends...</div>'; const P = "id,full_name,avatar_path,followers_count,verified";
+  const { data } = await db.from("friendships").select(`requester_id,addressee_id,req:profiles!friendships_requester_id_fkey(${P}),adr:profiles!friendships_addressee_id_fkey(${P})`)
+    .eq("status","accepted").or(`requester_id.eq.${me.id},addressee_id.eq.${me.id}`);
+  const fr = (data || []).map(f => f.requester_id === me.id ? f.adr : f.req);
+  box.innerHTML = `<div class="panel"><h3>Start a chat</h3>${fr.map(o => `<div class="q" style="display:flex;gap:10px;align-items:center;cursor:pointer" onclick="openDm('${o.id}')"><span class="avatar sm">${avatarInner(o)}</span><div style="flex:1">${esc(o.full_name)}${tick(o.verified)}</div></div>`).join("")
+    || '<div class="meta">You have no friends yet. <a href="#" class="un" onclick="go(\'friends\');return false">Find people</a> and send a friend request.</div>'}</div>`;
+}
 
 // ---------- Install as app ----------
 let deferred = null;
