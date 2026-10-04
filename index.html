@@ -266,6 +266,20 @@ html,body{overscroll-behavior-y:contain}
 .gcard{padding:0;overflow:hidden}.panel > .gcover{margin:-14px -14px 12px;border-radius:14px 14px 0 0}
 .gpic{width:64px;height:64px;border-radius:50%;background:var(--bg) center/cover no-repeat;display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px dashed var(--line);flex:none;overflow:hidden;color:var(--mute)}.gpic svg{width:26px;height:26px}
 .plist{max-height:210px;overflow-y:auto}.avatar svg{width:20px;height:20px}
+/* chat colours, reels, music, cropper */
+.m.me{background:var(--mine-bg,var(--chat-accent,var(--accent)));color:#fff}
+.sendbtn{background:var(--chat-accent,var(--accent));color:#fff}
+.chead{border-bottom:3px solid var(--chat-accent,var(--line))}
+.sn{color:var(--chat-accent,var(--accent))}.crow .avatar{color:#fff}
+main:has(.reelwrap){padding:0;max-width:none}.feedcol:has(.reelwrap){max-width:none}
+.reelwrap{height:calc(100dvh - var(--barh,112px));overflow-y:scroll;scroll-snap-type:y mandatory;overscroll-behavior:contain;scrollbar-width:none;background:#000}
+.reelwrap::-webkit-scrollbar{display:none}
+.reelwrap .reel{height:100%;max-height:none;min-height:0;margin:0 auto;max-width:480px;border-radius:0;border:0;scroll-snap-align:start;scroll-snap-stop:always}
+.reelplus{position:fixed;right:16px;bottom:calc(20px + env(safe-area-inset-bottom,0px));z-index:30;width:52px;height:52px;border-radius:50%;border:0;background:var(--accent);color:var(--on-accent);box-shadow:0 4px 14px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;cursor:pointer}.reelplus svg{width:28px;height:28px}
+.music{display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--head);border-top:1px solid var(--line)}
+.mplay{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}.mplay svg{width:16px;height:16px}
+.mt{display:flex;gap:6px;align-items:center;min-width:0;color:var(--ink);font-size:.9rem}.mt svg{width:18px;height:18px;flex:none}.mt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crop{position:relative;width:280px;height:280px;max-width:100%;margin:0 auto;border-radius:50%;overflow:hidden;touch-action:none;background:#000;cursor:grab}.crop canvas{display:block;width:280px;height:280px}
 </style>
 </head>
 <body>
@@ -531,12 +545,12 @@ function postHtml(p){
   const own = me && (me.id === p.author_id || profile?.role === "admin");
   return `<article class="car pcard" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong>${followBtn(p.author_id)}<div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption && p.image_path ? `<div class="cap" style="margin-top:6px">${esc(p.caption)}</div>` : ""}</div>
   ${!p.image_path ? textCard(p) : p.more_paths?.length ? collageHtml(p) : p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
-  <div class="body" style="gap:0"><div style="text-align:right">${own ? `<button class="lnk" onclick="delPost('${p.id}')">Delete</button>` : `<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div>${actBar(p, up, dn, nc, mine)}</div></article>`;
+  ${p.music_path ? musicBar(p) : ""}<div class="body" style="gap:0"><div style="text-align:right">${own ? `<button class="lnk" onclick="delPost('${p.id}')">Delete</button>` : `<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div>${actBar(p, up, dn, nc, mine)}</div></article>`;
 }
 function drawFeed(){
-  const y = window.scrollY, vt = {}; document.querySelectorAll("#plist video").forEach(v => { vt[v.getAttribute("src")] = v.currentTime; });
+  const pl0 = document.getElementById("plist"), rst = pl0 ? pl0.scrollTop : 0, y = window.scrollY, vt = {}; document.querySelectorAll("#plist video").forEach(v => { vt[v.getAttribute("src")] = v.currentTime; });
   $("#plist").innerHTML = feedRender ? feedRender() : (posts.map(postHtml).join("") || '<div class="empty">No photos yet. Be the first to post.</div>');
-  window.scrollTo(0, y); document.querySelectorAll("#plist video").forEach(v => { const t = vt[v.getAttribute("src")]; if (t) v.addEventListener("loadedmetadata", () => { v.currentTime = t; }, { once:true }); }); drawSheet(); watchVideos();
+  window.scrollTo(0, y); if (rst) document.getElementById("plist").scrollTop = rst; document.querySelectorAll("#plist video").forEach(v => { const t = vt[v.getAttribute("src")]; if (t) v.addEventListener("loadedmetadata", () => { v.currentTime = t; }, { once:true }); }); drawSheet(); watchVideos();
 }
 async function vote(id, val){
   if (!me) { toast("Log in to react"); return go("login"); }
@@ -645,7 +659,7 @@ function toggleMenu(e){
   e.stopPropagation(); const m = $("#menu"); if (!m.hidden) { m.hidden = true; return; }
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
   m.innerHTML = (me ? `<button onclick="openProfile('${me.id}')">My profile</button>` : '<button onclick="go(\'login\')">Log in or sign up</button>')
-    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "") + '<div class="meta" style="padding:8px 12px">TUchat version 5 (chat pro)</div>';
+    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "") + '<div class="meta" style="padding:8px 12px">TUchat version 6 (colours, reels, music)</div>';
   m.hidden = false;
 }
 document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; const g = document.getElementById("gmenu"); if (g) g.hidden = true; });
@@ -687,12 +701,13 @@ async function openProfile(uid, quiet){
       <div class="w"><label>Profile photo</label>${pick("avatar","image/*",false,"Change photo")}</div>
       <div class="w"><button class="btn" id="ps" type="submit">Save profile</button></div></form></div>` : ""}
     <div style="max-width:640px;margin:0 auto"><h3>Photos</h3><div class="pgrid">${ps.data.map(x => x.media_type === "video" ? `<video src="${photoUrl(x.image_path)}" muted preload="metadata"></video>` : `<img src="${photoUrl(x.image_path)}" loading="lazy" alt="">`).join("") || '<div class="meta">No photos yet.</div>'}</div></div>`;
+  if (mine) { avatarBlob = null; $("#pf2").avatar.addEventListener("change", async ev => { const f = ev.target.files[0]; if (!f) return; const b = await cropImage(f);
+    if (b) { avatarBlob = b; ev.target.closest("label").querySelector(".pn").textContent = "Photo ready ✓"; const big = document.querySelector(".avatar.big"); if (big) big.innerHTML = `<img src="${URL.createObjectURL(b)}" alt="">`; } else { ev.target.value = ""; avatarBlob = null; } }); }
   if (mine) $("#pf2").onsubmit = async e => {
     e.preventDefault(); const f = new FormData(e.target); $("#ps").disabled = true;
     const upd = { full_name:f.get("full_name"), business_name:f.get("business_name") || null, phone:f.get("phone") || null, town:f.get("town") || null, bio:f.get("bio") || null };
-    const file = e.target.avatar.files[0];
-    if (file) { const path = `${me.id}/avatar-${Date.now()}.jpg`;
-      const up = await db.storage.from("vehicle-photos").upload(path, await shrink(file), { contentType:"image/jpeg" });
+    if (avatarBlob) { const path = `${me.id}/avatar-${Date.now()}.jpg`;
+      const up = await db.storage.from("vehicle-photos").upload(path, avatarBlob, { contentType:"image/jpeg" });
       if (up.error) { toast(up.error.message); $("#ps").disabled = false; return; } upd.avatar_path = path; }
     const r = await db.from("profiles").update(upd).eq("id", me.id);
     toast(r.error ? r.error.message : "Profile saved"); await refreshUser(); openProfile(me.id, true);
@@ -715,7 +730,7 @@ window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 
 history.replaceState({ name:"tab", arg:"home", d:0 }, "");
 
 // ---------- Groups ----------
-const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count,verified),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name),media_type,more_paths,layout,bg";
+const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count,verified),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name),media_type,more_paths,layout,bg,music_path,music_title";
 let feedRender = null, homeItems = [];
 let gsetOpen = false;
 function joinBtn(gid, st, privacy, where){
@@ -841,11 +856,13 @@ function reelHtml(p){
 }
 async function reels(){
   feedRender = null;
-  $("#view").innerHTML = '<div class="feedcol"><div id="comp"></div><div id="plist"><div class="empty"><div class="spin"></div></div></div></div>';
-  $("#comp").innerHTML = me ? `<div class="panel promptbar"><button class="prompt" onclick="openCreate('reel')">Create a reel</button><button class="iconbtn" onclick="openCreate('reel')" aria-label="Create a reel">${ICON.reels}</button></div>` : "";
+  document.documentElement.style.setProperty("--barh", (document.querySelector(".bar")?.offsetHeight || 112) + "px");
+  $("#view").innerHTML = '<div class="feedcol"><div id="plist" class="reelwrap"><div class="empty"><div class="spin"></div></div></div></div>' + (me ? `<button class="reelplus" onclick="openCreate('reel')" aria-label="Create a reel">${ICON.plus}</button>` : "");
   const r = await db.from("posts").select(POST_SEL).eq("is_reel", true).order("created_at",{ascending:false}).limit(30);
   if (r.error) { $("#plist").innerHTML = `<div class="empty">${esc(r.error.message)}</div>`; return; }
-  posts = r.data; feedRender = () => posts.map(reelHtml).join("") || '<div class="empty">No reels yet. Share the first one.</div>'; drawFeed();
+  if (reelObs) reelObs.disconnect();
+  reelObs = new IntersectionObserver(es => es.forEach(e => { const v = e.target; if (e.intersectionRatio >= 0.65) { v.muted = reelMuted; v.play().catch(() => {}); } else v.pause(); }), { root:$("#plist"), threshold:[0, 0.65, 1] });
+  posts = r.data; feedRender = () => posts.map(reelHtml).join("") || '<div class="empty" style="color:#fff">No reels yet. Share the first one.</div>'; drawFeed();
 }
 
 // ---------- Icons ----------
@@ -957,7 +974,7 @@ async function openDm(uid, quiet){
     <button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div>
     <div class="recbar"><span class="recdot"></span><span id="rt">0:00</span><span class="meta" style="flex:1">Recording...</span>
     <button class="iconbtn" onclick="recStop(false)" aria-label="Cancel">✕</button><button class="sendbtn" onclick="recStop(true)" aria-label="Send voice note">${ICON.send}</button></div></div></div></div>`;
-  const box = $("#ms"); stickBottom(box);
+  const box = $("#ms"); setChatColor(); stickBottom(box);
   if (chan) db.removeChannel(chan);
   chan = db.channel("dm"+t.id).on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => { addMsg(p.new); markSeen(t.id); if (p.new.sender_id !== me.id && !document.hidden) db.rpc("mark_dm_read", { tid:t.id }).then(() => {}); })
     .on("postgres_changes", { event:"UPDATE", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => updateTick(p.new))
@@ -972,8 +989,12 @@ $("#hs").innerHTML = ICON.search; $("#hi").innerHTML = ICON.feed;
 
 // ---------- Videos pause when scrolled away ----------
 const vidObs = new IntersectionObserver(es => es.forEach(e => { if (e.intersectionRatio < 0.4) e.target.pause(); }), { threshold:[0, 0.4, 1] });
-const reelObs = new IntersectionObserver(es => es.forEach(e => { const v = e.target; if (e.intersectionRatio >= 0.6) { v.muted = reelMuted; v.play().catch(() => {}); } else v.pause(); }), { threshold:[0, 0.6, 1] });
-function watchVideos(){ document.querySelectorAll("video.pimg").forEach(v => vidObs.observe(v)); document.querySelectorAll("video.rv").forEach(v => reelObs.observe(v)); }
+let reelObs = null;
+function watchVideos(){
+  document.querySelectorAll("video.pimg").forEach(v => vidObs.observe(v));
+  document.querySelectorAll("video.rv").forEach(v => reelObs && reelObs.observe(v));
+  document.querySelectorAll(".music").forEach(m => musicObs.observe(m)); restoreMusic();
+}
 document.addEventListener("play", e => { if (e.target.tagName === "VIDEO") document.querySelectorAll("video").forEach(v => { if (v !== e.target) v.pause(); }); }, true);
 
 // ---------- Chats inbox (the home screen of the chat app) ----------
@@ -1027,7 +1048,7 @@ async function chats(){
 function drawInbox(){
   const q = ($("#cq")?.value || "").toLowerCase();
   const list = inbox.filter(x => (x.name + " " + (x.tag || "")).toLowerCase().includes(q));
-  $("#cl").innerHTML = list.map(x => `<div class="crow ${x.unread ? "unread" : ""}" onclick="${x.open}"><div class="avatar">${avatarInner(x.p)}</div>
+  $("#cl").innerHTML = list.map(x => `<div class="crow ${x.unread ? "unread" : ""}" style="border-left:5px solid ${chatColor(x.key)}" onclick="${x.open}"><div class="avatar" style="background:${chatColor(x.key)}">${avatarInner(x.p)}</div>
     <div class="cbody"><div class="ctop"><strong>${esc(x.name)}</strong>${tick(x.p?.verified)}<span class="meta">${ago(x.time)}</span></div>
     ${x.tag ? `<div class="meta">${esc(x.tag)}</div>` : ""}<div class="csub">${esc(x.sub)}</div></div>${x.unread ? '<span class="dot"></span>' : ""}</div>`).join("")
     || '<div class="empty">No chats yet. Tap the people icon to start one with a friend, or tap Chat on a vehicle.</div>';
@@ -1072,7 +1093,7 @@ async function openGc(id, quiet){
     <button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div>
     <div class="recbar"><span class="recdot"></span><span id="rt">0:00</span><span class="meta" style="flex:1">Recording...</span>
     <button class="iconbtn" onclick="recStop(false)" aria-label="Cancel">✕</button><button class="sendbtn" onclick="recStop(true)" aria-label="Send voice note">${ICON.send}</button></div></div></div></div>`;
-  const box = $("#ms"); stickBottom(box);
+  const box = $("#ms"); setChatColor(); stickBottom(box);
   if (chan) db.removeChannel(chan);
   chan = db.channel("gc"+id).on("postgres_changes", { event:"INSERT", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => { addMsg(p.new); markSeen(id); }).on("postgres_changes", { event:"UPDATE", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => updateTick(p.new)).on("broadcast", { event:"typing" }, p => showTyping(p.payload)).subscribe();
   const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
@@ -1355,8 +1376,10 @@ function drawCreate(){
   if (cwTab === "post") {
     body.innerHTML = `<label class="meta">Post to</label><select id="cwg" style="margin-bottom:10px"><option value="">Home feed</option>${cwGroups.map(g => `<option value="${g.id}" ${g.id === cwGid ? "selected" : ""}>${esc(g.name)} (group)</option>`).join("")}</select>
       <textarea id="pc" rows="4" placeholder="What's on your mind?" maxlength="500" style="resize:none"></textarea><div id="bgs"></div>
-      <div style="margin-top:12px">${pick("pf","image/*,video/*",true,"Add photos or video")}</div><div id="lay"></div>`;
+      <div style="margin-top:12px">${pick("pf","image/*,video/*",true,"Add photos or video")}</div><div id="lay"></div>
+      <div style="margin-top:12px">${pick("mus","audio/*",false,"Add music")}<input id="mti" placeholder="Song name (shown on your post)" maxlength="60" style="margin-top:8px;display:none"><p class="meta" style="font-weight:400;margin:6px 0 0">Only add music you have the right to share.</p></div>`;
     $("#pf").addEventListener("change", showLayouts); renderBgs();
+    $("#mus").addEventListener("change", () => { const f = $("#mus").files[0]; $("#mti").style.display = f ? "block" : "none"; if (f) $("#mti").value = f.name.replace(/\.[^.]+$/, "").slice(0, 60); });
   } else if (cwTab === "reel") {
     body.innerHTML = `<p class="meta">Reels are short videos shown in the Reels tab.</p><div>${pick("pf","video/*",false,"Choose a video")}</div><div style="height:12px"></div>
       <textarea id="pc" rows="3" placeholder="Caption (optional)" maxlength="500" style="resize:none"></textarea>`;
@@ -1372,6 +1395,13 @@ async function submitCreate(){
     btn.disabled = true; btn.textContent = "Posting...";
     const mf = files.length ? await buildMediaFields(files) : { image_path:null, media_type:"image", bg:chosenBg || null };
     if (mf.error) return fail(mf.error.message);
+    const mus = $("#mus")?.files[0];
+    if (mus) {
+      if (mf.media_type === "video") return fail("Music can be added to photo or word posts only");
+      if (!mus.type.startsWith("audio/") || mus.size > 10 * 1024 * 1024) return fail("Choose an audio file under 10 MB");
+      const ma = await uploadAudio(mus); if (ma.error) return fail(ma.error.message);
+      mf.music_path = ma.path; mf.music_title = ($("#mti").value.trim() || mus.name.replace(/\.[^.]+$/, "")).slice(0, 60);
+    }
     const gid = $("#cwg").value, row = { author_id:me.id, caption:cap || null, ...mf }; if (gid) row.group_id = gid;
     const r = await db.from("posts").insert(row); if (r.error) return fail(r.error.message);
     toast("Posted"); closeCreate(); gid ? openGroup(gid) : go("home");
@@ -1648,6 +1678,55 @@ async function gcAddPeople(id, existing){
     w.querySelector("[data-ok]").onclick = async () => { const ids = [...w.querySelectorAll(".gpk:checked")].map(x => x.value); if (!ids.length) return toast("Pick at least one person");
       const r = await db.from("gchat_members").insert(ids.map(u => ({ chat_id:id, user_id:u }))); toast(r.error ? r.error.message : "Added"); done(null); openGc(id, true); }; });
 }
+
+// ---------- Chat colours, photo cropper, music ----------
+let avatarBlob = null, musicAudio = null, musicBtn = null;
+const chatColor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} ${38 + (h >> 3) % 14}% 40%)`; };
+function setChatColor(){ document.querySelector(".cwin")?.style.setProperty("--chat-accent", chatColor(curThread)); }
+function cropImage(file, out = 400){
+  return new Promise(async res => {
+    const img = new Image(); img.src = URL.createObjectURL(file); try { await img.decode(); } catch (e) { return res(null); }
+    const S = 280; let z = 1, ox = 0, oy = 0; const base = () => Math.max(S / img.width, S / img.height);
+    const clamp = () => { const w = img.width * base() * z, h = img.height * base() * z; ox = Math.min(0, Math.max(S - w, ox)); oy = Math.min(0, Math.max(S - h, oy)); };
+    dialog(`<h3 style="margin:0 0 10px">Adjust your photo</h3><div class="crop"><canvas id="cv" width="${S}" height="${S}"></canvas></div>
+      <input type="range" id="zm" min="1" max="3" step="0.01" value="1" style="margin-top:12px;padding:0"><p class="meta" style="margin:6px 0 0;font-weight:400">Drag the photo to move it. Use the slider to zoom.</p>
+      <div class="row" style="margin-top:12px"><button class="btn alt" data-c>Cancel</button><button class="btn" data-ok>Use photo</button></div>`,
+    (w, done) => {
+      const cv = w.querySelector("#cv"), cx = cv.getContext("2d");
+      const draw = () => { clamp(); const sc = base() * z; cx.fillStyle = "#000"; cx.fillRect(0, 0, S, S); cx.drawImage(img, ox, oy, img.width * sc, img.height * sc); };
+      ox = (S - img.width * base()) / 2; oy = (S - img.height * base()) / 2; draw();
+      let drag = null;
+      cv.onpointerdown = e => { drag = [e.clientX, e.clientY, ox, oy]; cv.setPointerCapture(e.pointerId); };
+      cv.onpointermove = e => { if (!drag) return; ox = drag[2] + e.clientX - drag[0]; oy = drag[3] + e.clientY - drag[1]; draw(); };
+      cv.onpointerup = cv.onpointercancel = () => { drag = null; };
+      w.querySelector("#zm").oninput = e => { const c = S / 2, old = base() * z, nz = +e.target.value, nsc = base() * nz; ox = c - (c - ox) * nsc / old; oy = c - (c - oy) * nsc / old; z = nz; draw(); };
+      w.querySelector("[data-c]").onclick = () => done(null);
+      w.querySelector("[data-ok]").onclick = () => { const k = out / S, oc = document.createElement("canvas"); oc.width = oc.height = out; const sc = base() * z;
+        oc.getContext("2d").drawImage(img, ox * k, oy * k, img.width * sc * k, img.height * sc * k); oc.toBlob(b => done(b), "image/jpeg", 0.85); };
+    }).then(v => res(v || null));
+  });
+}
+ICON.music = _i('<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>');
+ICON.play = _i('<path d="M8 5v14l11-7z" fill="currentColor"/>');
+ICON.pause = _i('<path d="M7 5h3v14H7zM14 5h3v14h-3z" fill="currentColor"/>');
+const musicBar = p => `<div class="music" data-src="${photoUrl(p.music_path)}"><button class="mplay" onclick="toggleMusic(this)" aria-label="Play music">${ICON.play}</button><div class="mt">${ICON.music}<span>${esc(p.music_title || "Music")}</span></div></div>`;
+function stopMusic(){ if (musicAudio) musicAudio.pause(); if (musicBtn) musicBtn.innerHTML = ICON.play; musicBtn = null; }
+function toggleMusic(btn){
+  if (musicBtn === btn) return stopMusic();
+  stopMusic(); document.querySelectorAll("video").forEach(v => v.pause());
+  musicAudio = musicAudio || new Audio(); musicAudio.src = btn.parentNode.dataset.src; musicAudio.loop = true;
+  musicAudio.play().catch(() => toast("Could not play this music")); musicBtn = btn; btn.innerHTML = ICON.pause;
+}
+function restoreMusic(){
+  if (!musicAudio || musicAudio.paused) return; const el = [...document.querySelectorAll(".music")].find(m => m.dataset.src === musicAudio.src);
+  if (el) { musicBtn = el.querySelector(".mplay"); musicBtn.innerHTML = ICON.pause; }
+}
+const musicObs = new IntersectionObserver(es => es.forEach(e => { if (e.intersectionRatio < 0.2 && musicBtn && e.target.contains(musicBtn)) stopMusic(); }), { threshold:[0, 0.2] });
+async function uploadAudio(f){
+  const ext = (f.name.split(".").pop() || "mp3").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "mp3", path = `${me.id}/music-${Date.now()}.${ext}`;
+  const up = await db.storage.from("vehicle-photos").upload(path, f, { contentType: f.type || "audio/mpeg" }); return up.error ? { error:up.error } : { path };
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) document.querySelectorAll("video").forEach(v => v.pause()); });
 
 // ---------- Install as app ----------
 let deferred = null;
