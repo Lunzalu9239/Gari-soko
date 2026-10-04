@@ -280,6 +280,7 @@ main:has(.reelwrap){padding:0;max-width:none}.feedcol:has(.reelwrap){max-width:n
 .mplay{width:34px;height:34px;border-radius:50%;border:0;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;cursor:pointer;flex:none}.mplay svg{width:16px;height:16px}
 .mt{display:flex;gap:6px;align-items:center;min-width:0;color:var(--ink);font-size:.9rem}.mt svg{width:18px;height:18px;flex:none}.mt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .crop{position:relative;width:280px;height:280px;max-width:100%;margin:0 auto;border-radius:50%;overflow:hidden;touch-action:none;background:#000;cursor:grab}.crop canvas{display:block;width:280px;height:280px}
+.seg{display:flex;gap:6px;margin-bottom:12px}.seg button{flex:1;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:99px;padding:8px;font:inherit;cursor:pointer}.seg button.on{background:var(--accent);color:var(--on-accent);border-color:transparent}
 </style>
 </head>
 <body>
@@ -314,7 +315,7 @@ async function refreshUser(){
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
   if (!booted) { booted = true; if (me) { tab = "chats"; history.replaceState({ name:"tab", arg:"chats", d:0 }, ""); } }
   $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
-  drawNav(); render(); if (me) { updateBadge(); startNotifs(); loadFollows(); } else unreadN = 0;
+  drawNav(); render(); if (me) { updateBadge(); startNotifs(); loadFollows(); loadPrefs(); } else unreadN = 0;
 }
 async function logout(){ if (nchan) { db.removeChannel(nchan); nchan = null; } setNB(0); await db.auth.signOut(); tab="home"; refreshUser(); }
 
@@ -659,7 +660,7 @@ function toggleMenu(e){
   e.stopPropagation(); const m = $("#menu"); if (!m.hidden) { m.hidden = true; return; }
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
   m.innerHTML = (me ? `<button onclick="openProfile('${me.id}')">My profile</button>` : '<button onclick="go(\'login\')">Log in or sign up</button>')
-    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "") + '<div class="meta" style="padding:8px 12px">TUchat version 6 (colours, reels, music)</div>';
+    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "") + '<div class="meta" style="padding:8px 12px">TUchat version 7 (wallpaper saved to account)</div>';
   m.hidden = false;
 }
 document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; const g = document.getElementById("gmenu"); if (g) g.hidden = true; });
@@ -1459,36 +1460,54 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && me
 ICON.tune = _i('<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>');
 const WALLS = ["linear-gradient(160deg,#dfe8f7,#f4eefb)","linear-gradient(160deg,#d6efe6,#e6f3d8)","linear-gradient(160deg,#fbe3d6,#fbd6e3)","linear-gradient(160deg,#2b3544,#1c2430)","#f1f3f6","#10161e"];
 const BUBBLES = ["", "#2f855a", "#c05299", "#6b46c1", "#d9625a", "#1f8a8a", "#3b4a5a"];
-let chatPrefs = { wall:"", bubble:"", fz:1 };
-try { chatPrefs = { ...chatPrefs, ...JSON.parse(localStorage.getItem("gs-chatprefs") || "{}") }; } catch (e) {}
+let chatPrefs = { all:{ wall:"", bubble:"" }, fz:1, chat:{} }, prefTimer = null;
+try { const o = JSON.parse(localStorage.getItem("gs-chatprefs") || "{}"); chatPrefs = { all:{ wall:o.all?.wall ?? o.wall ?? "", bubble:o.all?.bubble ?? o.bubble ?? "" }, fz:o.fz || 1, chat:o.chat || {} }; } catch (e) {}
 function applyPrefs(){
-  const r = document.documentElement.style, w = chatPrefs.wall;
-  w ? r.setProperty("--chat-wall", w.startsWith("data:") ? `url("${w}") center/cover` : w) : r.removeProperty("--chat-wall");
-  chatPrefs.bubble ? r.setProperty("--mine-bg", chatPrefs.bubble) : r.removeProperty("--mine-bg");
-  r.setProperty("--chat-fz", chatPrefs.fz || 1);
+  document.documentElement.style.setProperty("--chat-fz", chatPrefs.fz || 1);
+  const el = document.querySelector(".cwin"); if (!el) return;
+  const e = { ...chatPrefs.all, ...(chatPrefs.chat[curThread] || {}) };
+  e.wall ? el.style.setProperty("--chat-wall", e.wall.startsWith("data:") ? `url("${e.wall}") center/cover` : e.wall) : el.style.removeProperty("--chat-wall");
+  e.bubble ? el.style.setProperty("--mine-bg", e.bubble) : el.style.removeProperty("--mine-bg");
 }
-function savePrefs(){ try { localStorage.setItem("gs-chatprefs", JSON.stringify(chatPrefs)); } catch (e) { toast("This device has no room to save that wallpaper"); } applyPrefs(); }
-async function setWallpaper(inp){
+function savePrefs(){
+  try { localStorage.setItem("gs-chatprefs", JSON.stringify(chatPrefs)); } catch (e) { toast("This device has no room to save that wallpaper"); }
+  applyPrefs(); clearTimeout(prefTimer); prefTimer = setTimeout(syncPrefs, 800);
+}
+async function syncPrefs(){ if (!me) return; const r = await db.from("user_prefs").upsert({ user_id:me.id, prefs:chatPrefs, updated_at:new Date().toISOString() }); if (r.error) console.warn(r.error.message); }
+async function loadPrefs(){
+  if (!me) return; const { data } = await db.from("user_prefs").select("prefs").eq("user_id", me.id).maybeSingle();
+  if (data?.prefs?.all) { chatPrefs = { all:{ wall:"", bubble:"", ...data.prefs.all }, fz:data.prefs.fz || 1, chat:data.prefs.chat || {} };
+    try { localStorage.setItem("gs-chatprefs", JSON.stringify(chatPrefs)); } catch (e) {} applyPrefs(); }
+  else if (chatPrefs.all.wall || chatPrefs.all.bubble || Object.keys(chatPrefs.chat).length) syncPrefs();
+}
+async function setWallpaper(inp, target){
   const f = inp.files[0]; inp.value = ""; if (!f) return;
-  const img = new Image(); img.src = URL.createObjectURL(f); await img.decode().catch(() => {});
-  const sc = Math.min(1, 900 / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = img.width * sc; c.height = img.height * sc;
-  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); chatPrefs.wall = c.toDataURL("image/jpeg", 0.7); savePrefs(); toast("Wallpaper set");
+  const img = new Image(); img.src = URL.createObjectURL(f); try { await img.decode(); } catch (e) { return toast("Could not read that photo"); }
+  const sc = Math.min(1, 1280 / Math.max(img.width, img.height)), c = document.createElement("canvas"); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+  c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); const old = target.wall; target.wall = c.toDataURL("image/jpeg", 0.82);
+  if (JSON.stringify(chatPrefs).length > 2500000) { target.wall = old; return toast("Too many wallpapers saved. Reset some chats first."); }
+  savePrefs(); toast("Wallpaper saved to your account");
 }
-function openChatSettings(){
+function openChatSettings(scope = "chat"){
+  const eff = { ...chatPrefs.all, ...(scope === "chat" ? (chatPrefs.chat[curThread] || {}) : {}) };
   const sw = (arr, cur, k) => arr.map((v, i) => `<button type="button" class="bgsw ${cur === v ? "sel" : ""}" data-${k}="${i}" style="background:${v || "var(--accent)"}" aria-label="Option ${i + 1}"></button>`).join("");
-  dialog(`<h3 style="margin:0 0 12px">Chat settings</h3><div class="meta">Wallpaper</div>
+  dialog(`<h3 style="margin:0 0 10px">Chat settings</h3>
+    <div class="seg"><button data-s="chat" class="${scope === "chat" ? "on" : ""}">This chat</button><button data-s="all" class="${scope === "all" ? "on" : ""}">All chats</button></div>
+    <div class="meta">Wallpaper</div>
     <label class="pick" style="margin:6px 0">${ICON.feed}<span class="pn">Choose from your gallery</span><input type="file" accept="image/*" hidden id="wpf"></label>
-    <div class="bgs"><button type="button" class="bgsw ${chatPrefs.wall === "" ? "sel" : ""}" data-w="-1" style="background:#111 url(/chat-bg.jpg) center/cover" aria-label="Default cats"></button>${sw(WALLS, chatPrefs.wall, "w")}</div>
-    <div class="meta" style="margin-top:14px">My message color</div><div class="bgs">${sw(BUBBLES, chatPrefs.bubble, "b")}</div>
-    <div class="meta" style="margin-top:14px">Text size</div><div class="row">${[["Small", 0.9], ["Medium", 1], ["Large", 1.15]].map(([l, v]) => `<button class="btn ${chatPrefs.fz === v ? "" : "alt"}" data-fz="${v}">${l}</button>`).join("")}</div>
-    <div class="row" style="margin-top:16px"><button class="btn alt" data-reset>Reset</button><button class="btn" data-ok>Done</button></div>`,
+    <div class="bgs"><button type="button" class="bgsw ${eff.wall === "" ? "sel" : ""}" data-w="-1" style="background:#111 url(/chat-bg.jpg) center/cover" aria-label="Default cats"></button>${sw(WALLS, eff.wall, "w")}</div>
+    <div class="meta" style="margin-top:14px">My message color</div><div class="bgs">${sw(BUBBLES, eff.bubble, "b")}</div>
+    <div class="meta" style="margin-top:14px">Text size (all chats)</div><div class="row">${[["Small", 0.9], ["Medium", 1], ["Large", 1.15]].map(([l, v]) => `<button class="btn ${chatPrefs.fz === v ? "" : "alt"}" data-fz="${v}">${l}</button>`).join("")}</div>
+    <div class="row" style="margin-top:16px"><button class="btn alt" data-reset>Reset ${scope === "chat" ? "this chat" : "all"}</button><button class="btn" data-ok>Done</button></div>`,
   (w, done) => {
+    const tgt = () => scope === "all" ? chatPrefs.all : (chatPrefs.chat[curThread] = chatPrefs.chat[curThread] || {});
     const mark = (sel, on) => w.querySelectorAll(sel).forEach(b => b.classList.toggle("sel", b === on));
-    w.querySelector("#wpf").onchange = async e => { await setWallpaper(e.target); mark("[data-w]", null); };
-    w.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { chatPrefs.wall = b.dataset.w === "-1" ? "" : WALLS[+b.dataset.w]; savePrefs(); mark("[data-w]", b); });
-    w.querySelectorAll("[data-b]").forEach(b => b.onclick = () => { chatPrefs.bubble = BUBBLES[+b.dataset.b]; savePrefs(); mark("[data-b]", b); });
+    w.querySelectorAll("[data-s]").forEach(b => b.onclick = () => { done(null); openChatSettings(b.dataset.s); });
+    w.querySelector("#wpf").onchange = async e => { await setWallpaper(e.target, tgt()); mark("[data-w]", null); };
+    w.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { tgt().wall = b.dataset.w === "-1" ? "" : WALLS[+b.dataset.w]; savePrefs(); mark("[data-w]", b); });
+    w.querySelectorAll("[data-b]").forEach(b => b.onclick = () => { tgt().bubble = BUBBLES[+b.dataset.b]; savePrefs(); mark("[data-b]", b); });
     w.querySelectorAll("[data-fz]").forEach(b => b.onclick = () => { chatPrefs.fz = +b.dataset.fz; savePrefs(); w.querySelectorAll("[data-fz]").forEach(x => x.classList.toggle("alt", x !== b)); });
-    w.querySelector("[data-reset]").onclick = () => { chatPrefs = { wall:"", bubble:"", fz:1 }; savePrefs(); done(null); openChatSettings(); };
+    w.querySelector("[data-reset]").onclick = () => { if (scope === "chat") delete chatPrefs.chat[curThread]; else { chatPrefs.all = { wall:"", bubble:"" }; chatPrefs.fz = 1; } savePrefs(); done(null); openChatSettings(scope); };
     w.querySelector("[data-ok]").onclick = () => done(null);
   });
 }
@@ -1682,7 +1701,7 @@ async function gcAddPeople(id, existing){
 // ---------- Chat colours, photo cropper, music ----------
 let avatarBlob = null, musicAudio = null, musicBtn = null;
 const chatColor = id => { let h = 0; for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `hsl(${h % 360} ${38 + (h >> 3) % 14}% 40%)`; };
-function setChatColor(){ document.querySelector(".cwin")?.style.setProperty("--chat-accent", chatColor(curThread)); }
+function setChatColor(){ document.querySelector(".cwin")?.style.setProperty("--chat-accent", chatColor(curThread)); applyPrefs(); }
 function cropImage(file, out = 400){
   return new Promise(async res => {
     const img = new Image(); img.src = URL.createObjectURL(file); try { await img.decode(); } catch (e) { return res(null); }
