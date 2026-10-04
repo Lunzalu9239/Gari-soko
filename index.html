@@ -198,6 +198,15 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 @keyframes svp{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 .sv-head{position:absolute;top:22px;left:12px;right:12px;display:flex;gap:8px;align-items:center;color:#fff;z-index:3}
 .sv-prev,.sv-next{position:absolute;top:70px;bottom:0;width:40%;z-index:2}.sv-prev{left:0}.sv-next{right:0}
+/* bigger action icons, full-width posts, left-side reel icons */
+.ab{padding:11px 4px}.ab svg{width:23px;height:23px}
+.racts{left:10px;right:auto;bottom:14px}.racts button{background:transparent;padding:6px 8px;text-shadow:0 1px 3px #000}
+.racts svg{width:28px;height:28px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}.racts span{font-size:.8rem}
+.racts .sel{background:transparent;color:var(--accent)}.racts .sel svg{fill:var(--accent);fill-opacity:.35}
+.rcap{left:78px;right:12px}
+.reel{height:calc(100dvh - 170px);min-height:420px;max-height:780px}.rv{height:100%}
+.menu button{white-space:nowrap}
+@media(max-width:600px){.pcard,.reel{margin-left:-16px;margin-right:-16px;border-radius:0;border-left:0;border-right:0;box-shadow:none}}
 </style>
 </head>
 <body>
@@ -458,7 +467,7 @@ function postHtml(p){
   const up = v.filter(x=>x.value===1).length, dn = v.filter(x=>x.value===-1).length;
   const nc = p.post_comments?.[0]?.count || 0;
   const own = me && (me.id === p.author_id || profile?.role === "admin");
-  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong>${followBtn(p.author_id)}<div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div class="cap" style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
+  return `<article class="car pcard" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong>${followBtn(p.author_id)}<div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div class="cap" style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
   ${p.more_paths?.length ? collageHtml(p) : p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
   <div class="body" style="gap:0"><div style="text-align:right">${own ? `<button class="lnk" onclick="delPost('${p.id}')">Delete</button>` : `<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div>${actBar(p, up, dn, nc, mine)}</div></article>`;
 }
@@ -577,7 +586,7 @@ function toggleMenu(e){
     + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "");
   m.hidden = false;
 }
-document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; });
+document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; const g = document.getElementById("gmenu"); if (g) g.hidden = true; });
 { let t = "light"; try { t = localStorage.getItem("gs-theme") || "light"; } catch (e) {} setTheme(t); }
 
 // ---------- Crowns, names, avatars ----------
@@ -669,7 +678,7 @@ async function groups(){
   const mine = new Map((m.data||[]).map(x => [x.group_id, x.status]));
   $("#gl").innerHTML = g.data.map(x => { const n = x.group_members?.[0]?.count || 0;
     return `<article class="panel car click" style="padding:14px" onclick="openGroup('${x.id}')"><strong>${esc(x.name)}</strong>
-    <div class="meta">${lock(x.privacy)} · ${n} member${n===1?"":"s"}</div><div>${esc(x.description||"")}</div>
+    <div class="meta">${lock(x.privacy)}${(x.privacy === "public" || mine.get(x.id) === "active" || me?.id === x.owner_id) ? ` · ${n} member${n===1?"":"s"}` : ""}</div><div>${esc(x.description||"")}</div>
     <div class="row">${me?.id === x.owner_id ? '<span class="tag">You own this group</span>' : joinBtn(x.id, mine.get(x.id), x.privacy, "list")}</div></article>`; }).join("")
     || '<div class="empty">No groups yet. Create the first one.</div>';
 }
@@ -699,14 +708,19 @@ async function openGroup(gid, quiet){
     db.from("groups").select("id,name,description,privacy,owner_id,group_members(count)").eq("group_members.status","active").eq("id",gid).single(),
     me ? db.from("group_members").select("status").eq("group_id",gid).eq("user_id",me.id).maybeSingle() : Promise.resolve({data:null})]);
   if (g.error) { $("#view").innerHTML = `<div class="empty">${esc(g.error.message)}</div>`; return; }
-  const G = g.data, st = mm.data?.status || "", member = st === "active", owner = me?.id === G.owner_id, n = G.group_members?.[0]?.count || 0;
+  curOwner = g.data.owner_id; const G = g.data, st = mm.data?.status || "", member = st === "active", owner = me?.id === G.owner_id, n = G.group_members?.[0]?.count || 0;
   const canSee = G.privacy === "public" || member || owner || profile?.role === "admin";
   let mem = [];
   if (owner) { const r = await db.from("group_members").select("user_id,status,profiles!group_members_user_id_fkey(full_name,avatar_path,followers_count,verified)").eq("group_id",gid); mem = r.data || []; }
   const prow = (x, btns) => `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${x.user_id}')">${avatarInner(x.profiles)}</button><div style="flex:1">${nameLink(x.profiles, x.user_id)}</div>${btns}</div>`;
   const pend = mem.filter(x => x.status === "pending"), act = mem.filter(x => x.status === "active" && x.user_id !== me.id);
-  $("#gh").innerHTML = `<div class="panel"><h2 style="margin:0">${esc(G.name)}</h2><div class="meta">${lock(G.privacy)} · ${n} member${n===1?"":"s"}</div>
-    <p>${esc(G.description || "")}</p><div class="row">${owner ? '<button class="btn alt" onclick="toggleSettings()">⚙ Group settings</button>' : joinBtn(gid, st, G.privacy, "group")}</div></div>
+  $("#gh").innerHTML = `<div class="panel"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div><h2 style="margin:0">${esc(G.name)}</h2>
+    <div class="meta">${lock(G.privacy)}${canSee ? ` · ${n} member${n===1?"":"s"}` : ""}</div></div>
+    <div style="position:relative"><button class="circ" onclick="toggleGMenu(event)" aria-label="Group options">${ICON.dots}</button><div id="gmenu" class="menu" hidden>
+      ${canSee ? `<button onclick="showMembers('${gid}')">Members (${n})</button>` : ""}
+      ${owner ? '<button onclick="toggleSettings()">Group settings</button>' : st === "active" ? `<button onclick="toggleJoin('${gid}','active','${G.privacy}','group')">Leave group</button>` : ""}
+    </div></div></div>
+    <p>${esc(G.description || "")}</p>${owner || st === "active" ? "" : `<div class="row">${joinBtn(gid, st, G.privacy, "group")}</div>`}<div id="gmem"></div></div>
     ${owner ? `<div class="panel" id="gset" ${gsetOpen ? "" : "hidden"}><h3>Group settings</h3><form class="f" id="gsf">
       <div class="w"><label>Name</label><input name="name" value="${esc(G.name)}" required minlength="3" maxlength="60"></div>
       <div class="w"><label>Description</label><textarea name="description" rows="2" maxlength="300">${esc(G.description)}</textarea></div>
@@ -1209,6 +1223,19 @@ async function delStory(id){
   if (!confirm("Delete this story?")) return;
   const r = await db.from("stories").delete().eq("id",id); if (r.error) return toast(r.error.message);
   closeStory(); loadStories(); toast("Story deleted");
+}
+
+// ---------- Group menu and member list ----------
+let curOwner = null;
+ICON.dots = _i('<circle cx="12" cy="5" r="1.7" fill="currentColor"/><circle cx="12" cy="12" r="1.7" fill="currentColor"/><circle cx="12" cy="19" r="1.7" fill="currentColor"/>');
+function toggleGMenu(e){ e.stopPropagation(); const m = document.getElementById("gmenu"); m.hidden = !m.hidden; }
+async function showMembers(gid){
+  const box = document.getElementById("gmem"); if (box.innerHTML) { box.innerHTML = ""; return; }
+  box.innerHTML = '<div class="meta" style="margin-top:10px">Loading members...</div>';
+  const { data, error } = await db.from("group_members").select("user_id,profiles!group_members_user_id_fkey(full_name,avatar_path,followers_count,verified)").eq("group_id",gid).eq("status","active");
+  if (error) { box.innerHTML = `<div class="meta">${esc(error.message)}</div>`; return; }
+  box.innerHTML = `<h3 style="margin-top:14px">Members (${data.length})</h3>${data.map(x => `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${x.user_id}')">${avatarInner(x.profiles)}</button>
+    <div style="flex:1">${nameLink(x.profiles, x.user_id)}${x.user_id === curOwner ? ' <span class="tag">Owner</span>' : ""}</div>${followBtn(x.user_id)}</div>`).join("")}`;
 }
 
 // ---------- Install as app ----------
