@@ -220,13 +220,25 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 .sv-eye{position:absolute;bottom:20px;left:16px;z-index:4;display:flex;gap:8px;align-items:center;background:rgba(0,0,0,.5);color:#fff;border:0;border-radius:99px;padding:9px 16px;cursor:pointer;font:inherit}
 .sv-eye svg{width:22px;height:22px}
 .sv-sheet{position:absolute;left:0;right:0;bottom:0;max-height:60vh;background:var(--card);color:var(--ink);border-radius:16px 16px 0 0;z-index:6;display:flex;flex-direction:column}
+/* create window + prompt bar */
+#createwin{position:fixed;inset:0;z-index:60;background:var(--bg);display:flex;flex-direction:column;animation:cwin .22s ease}
+@keyframes cwin{from{transform:translateY(28px);opacity:0}to{transform:none;opacity:1}}
+.cw-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--head);border-bottom:1px solid var(--line)}
+.cw-tabs{display:flex;gap:6px;padding:10px 12px;max-width:560px;width:100%;margin:0 auto}
+.cw-tabs button{flex:1;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px;border-radius:99px;font:inherit;cursor:pointer}
+.cw-tabs button.on{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.cw-body{flex:1;overflow-y:auto;padding:4px 12px 28px;max-width:560px;width:100%;margin:0 auto}
+.promptbar{display:flex;align-items:center;gap:10px;padding:10px 12px}
+.prompt{flex:1;text-align:left;background:var(--bg);border:0;border-radius:99px;padding:11px 16px;color:var(--mute);font:inherit;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.promptbar .avatar{cursor:default}
+#toast{z-index:100}
 </style>
 </head>
 <body>
 <div class="bar"><header>
 <div class="l"><button id="back" class="circ" style="display:none" onclick="goBack()" aria-label="Go back">←</button><h1><svg class="lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>TU<b>chat</b></h1></div>
 <div class="r"><button id="hs" class="circ" onclick="go('search')" aria-label="Search"></button>
-<button id="hi" class="circ" onclick="go('home')" aria-label="Create a post"></button>
+<button id="hi" class="circ" onclick="openCreate('post')" aria-label="Create"></button>
 <button id="hn" class="circ" onclick="go('notifs')" aria-label="Notifications"><span id="ni"></span><span id="nb" class="nbadge" hidden></span></button>
 <div style="position:relative"><button id="hp" class="circ" onclick="toggleMenu(event)" aria-label="Profile and settings"></button><div id="menu" class="menu" hidden></div></div></div>
 </header><nav id="nav"></nav></div>
@@ -264,7 +276,7 @@ function drawNav(){
   t.push(["reels","Reels"],["groups","Groups"]);
   if (me) t.push(["friends","Friends"]);
   $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}${k === "chats" && unreadN ? `<span class="badge">${unreadN > 9 ? "9+" : unreadN}</span>` : ""}</button>`).join("");
-  $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "home"); $("#hn").classList.toggle("on", tab === "notifs");
+  $("#hs").classList.toggle("on", tab === "search"); $("#hn").classList.toggle("on", tab === "notifs");
 }
 function go(t, quiet){ closeSheet(); closeStory(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
 function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends, chats, reels, notifs})[tab] || (() => {}))(); }
@@ -588,7 +600,7 @@ function openCar(id, quiet){
 
 // ---------- Light / dark mode (light by default) ----------
 function setTheme(t){
-  document.documentElement.setAttribute("data-theme", t);
+  document.documentElement.setAttribute("data-theme", t); document.querySelectorAll(".thm").forEach(b => { b.innerHTML = themeIcon(); });
   try { localStorage.setItem("gs-theme", t); } catch (e) {}
 }
 function toggleTheme(){ setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark"); }
@@ -746,17 +758,8 @@ async function openGroup(gid, quiet){
     $("#gsf").onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
       const r = await db.from("groups").update({ name:f.get("name").trim(), description:f.get("description") || null, privacy:f.get("privacy") }).eq("id",gid);
       toast(r.error ? r.error.message : "Settings saved"); openGroup(gid, true); }; }
-  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(G.name)}</h3>${pick("pf","image/*,video/*",true,"Add photos or video")}<div style="height:8px"></div>
-    <textarea id="pc" rows="2" placeholder="Say something" maxlength="500" style="resize:none"></textarea><div id="bgs"></div><div style="height:8px"></div><button class="btn" id="pb">Post</button><div id="lay"></div></div>`
+  $("#comp").innerHTML = member ? `<div class="panel promptbar"><span class="avatar sm">${avatarInner(profile)}</span><button class="prompt" onclick="openCreate('post','${gid}')">Post in ${esc(G.name)}</button><button class="iconbtn" onclick="openCreate('post','${gid}')" aria-label="Create a post">${ICON.feed}</button></div>`
     : `<div class="panel meta">${canSee ? "Join this group to post here." : "🔒 This is a private group. Request to join to see its posts."}</div>`;
-  if (member) { $("#pf").addEventListener("change", showLayouts); renderBgs(); }
-  if (member) $("#pb").onclick = async () => {
-    const files = [...$("#pf").files]; if (!files.length && !$("#pc").value.trim()) return toast("Write something or choose a photo or video");
-    $("#pb").disabled = true; $("#pb").textContent = "Posting...";
-    const mf = files.length ? await buildMediaFields(files) : { image_path:null, media_type:"image", bg:chosenBg || null };
-    if (mf.error) toast(mf.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, ...mf }); toast(r.error ? r.error.message : "Posted"); }
-    openGroup(gid, true);
-  };
   if (!canSee) { $("#plist").innerHTML = ""; return; }
   const ps = await db.from("posts").select(POST_SEL).eq("group_id",gid).order("created_at",{ascending:false}).limit(50);
   if (ps.error) { $("#plist").innerHTML = `<div class="empty">${esc(ps.error.message)}</div>`; return; }
@@ -773,17 +776,10 @@ function homeVeh(c){
 async function home(){
   feedRender = null;
   $("#view").innerHTML = '<div class="feedcol"><div id="comp"></div><div id="plist"><div class="empty"><div class="spin"></div></div></div></div>';
-  $("#comp").innerHTML = me ? `<div class="panel"><div style="display:flex;gap:10px;align-items:center"><span class="avatar sm">${avatarInner(profile)}</span><textarea id="pc" rows="2" placeholder="What's on your mind?" maxlength="500" style="resize:none"></textarea></div><div id="bgs"></div>
-    <div class="send" style="margin-top:10px;justify-content:space-between">${pick("pf","image/*,video/*",true,"Photos or video")}<button class="btn" id="pb">Post</button></div><div id="lay"></div></div>`
-    : '<div class="panel">Log in to share posts. <a href="#" class="un" onclick="go(\'login\');return false">Log in or sign up</a></div>';
-  if (me) $("#pb").onclick = async () => {
-    const files = [...$("#pf").files]; if (!files.length && !$("#pc").value.trim()) return toast("Write something or choose a photo or video");
-    $("#pb").disabled = true; $("#pb").textContent = "Posting...";
-    const mf = files.length ? await buildMediaFields(files) : { image_path:null, media_type:"image", bg:chosenBg || null };
-    if (mf.error) toast(mf.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, caption:$("#pc").value.trim() || null, ...mf }); toast(r.error ? r.error.message : "Posted"); }
-    home();
-  };
-  if (me) { $("#pf").addEventListener("change", showLayouts); renderBgs(); }
+  $("#comp").innerHTML = me ? `<div class="panel promptbar"><span class="avatar sm">${avatarInner(profile)}</span><button class="prompt" onclick="openCreate('post')">What's on your mind?</button>
+    <button class="iconbtn" onclick="openCreate('post')" aria-label="Create a post">${ICON.feed}</button>
+    <button class="iconbtn thm" onclick="toggleTheme()" aria-label="Switch light or dark mode">${themeIcon()}</button></div>`
+    : `<div class="panel promptbar"><button class="prompt" onclick="go('login')">Log in or sign up to post</button><button class="iconbtn thm" onclick="toggleTheme()" aria-label="Switch light or dark mode">${themeIcon()}</button></div>`;
   const [ps, mm] = await Promise.all([
     db.from("posts").select(POST_SEL).eq("is_reel", false).order("created_at",{ascending:false}).limit(60),
     me ? db.from("group_members").select("group_id").eq("user_id",me.id).eq("status","active") : Promise.resolve({data:[]})]);
@@ -804,15 +800,7 @@ function reelHtml(p){
 async function reels(){
   feedRender = null;
   $("#view").innerHTML = '<div class="feedcol"><div id="comp"></div><div id="plist"><div class="empty"><div class="spin"></div></div></div></div>';
-  $("#comp").innerHTML = me ? `<div class="panel"><h3>Create a reel</h3>${pick("rf","video/*",false,"Choose a video")}<div style="height:8px"></div>
-    <input id="rc" placeholder="Caption (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="rb">Share reel</button></div>` : "";
-  if (me) $("#rb").onclick = async () => {
-    const f = $("#rf").files[0]; if (!f || !f.type.startsWith("video/")) return toast("Choose a video first");
-    $("#rb").disabled = true; $("#rb").textContent = "Sharing...";
-    const up = await uploadMedia(f);
-    if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, caption:$("#rc").value.trim() || null, image_path:up.path, media_type:"video", is_reel:true }); toast(r.error ? r.error.message : "Reel shared"); }
-    reels();
-  };
+  $("#comp").innerHTML = me ? `<div class="panel promptbar"><button class="prompt" onclick="openCreate('reel')">Create a reel</button><button class="iconbtn" onclick="openCreate('reel')" aria-label="Create a reel">${ICON.reels}</button></div>` : "";
   const r = await db.from("posts").select(POST_SEL).eq("is_reel", true).order("created_at",{ascending:false}).limit(30);
   if (r.error) { $("#plist").innerHTML = `<div class="empty">${esc(r.error.message)}</div>`; return; }
   posts = r.data; feedRender = () => posts.map(reelHtml).join("") || '<div class="empty">No reels yet. Share the first one.</div>'; drawFeed();
@@ -1291,6 +1279,65 @@ async function showViewers(id){
   el.appendChild(sh);
 }
 function closeViewers(){ document.querySelector(".sv-sheet")?.remove(); stepStory(0); }
+
+// ---------- Create window (posts, reels and stories) ----------
+ICON.sun = _i('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>');
+ICON.moon = _i('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>');
+const themeIcon = () => document.documentElement.getAttribute("data-theme") === "dark" ? ICON.sun : ICON.moon;
+let cwTab = "post", cwGroups = [], cwGid = "";
+function closeCreate(){ document.getElementById("createwin")?.remove(); }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeCreate(); });
+async function openCreate(tabName, gid){
+  if (!me) { toast("Log in to post"); return go("login"); }
+  closeCreate(); closeSheet(); cwTab = tabName || "post"; cwGid = gid || ""; chosenBg = ""; chosenLayout = "";
+  const el = document.createElement("div"); el.id = "createwin"; document.body.appendChild(el);
+  el.innerHTML = `<div class="cw-head"><button class="circ" onclick="closeCreate()" aria-label="Close">✕</button><strong>Create</strong><button class="btn" id="cwpost" onclick="submitCreate()">Post</button></div>
+    <div class="cw-tabs">${[["post","Post"],["reel","Reel"],["story","Story"]].map(([k, v]) => `<button data-t="${k}" onclick="cwSwitch('${k}')">${v}</button>`).join("")}</div><div class="cw-body" id="cwbody"><div class="spin"></div></div>`;
+  const { data } = await db.from("group_members").select("group_id,groups!group_members_group_id_fkey(name)").eq("user_id",me.id).eq("status","active");
+  cwGroups = (data || []).filter(x => x.groups).map(x => ({ id:x.group_id, name:x.groups.name })); drawCreate();
+}
+function cwSwitch(t){ cwTab = t; chosenBg = ""; chosenLayout = ""; drawCreate(); }
+function drawCreate(){
+  const body = document.getElementById("cwbody"); if (!body) return;
+  document.querySelectorAll(".cw-tabs button").forEach(b => b.classList.toggle("on", b.dataset.t === cwTab));
+  const btn = $("#cwpost"); btn.disabled = false; btn.textContent = cwTab === "post" ? "Post" : cwTab === "reel" ? "Share reel" : "Add to story";
+  if (cwTab === "post") {
+    body.innerHTML = `<label class="meta">Post to</label><select id="cwg" style="margin-bottom:10px"><option value="">Home feed</option>${cwGroups.map(g => `<option value="${g.id}" ${g.id === cwGid ? "selected" : ""}>${esc(g.name)} (group)</option>`).join("")}</select>
+      <textarea id="pc" rows="4" placeholder="What's on your mind?" maxlength="500" style="resize:none"></textarea><div id="bgs"></div>
+      <div style="margin-top:12px">${pick("pf","image/*,video/*",true,"Add photos or video")}</div><div id="lay"></div>`;
+    $("#pf").addEventListener("change", showLayouts); renderBgs();
+  } else if (cwTab === "reel") {
+    body.innerHTML = `<p class="meta">Reels are short videos shown in the Reels tab.</p><div>${pick("pf","video/*",false,"Choose a video")}</div><div style="height:12px"></div>
+      <textarea id="pc" rows="3" placeholder="Caption (optional)" maxlength="500" style="resize:none"></textarea>`;
+  } else {
+    body.innerHTML = `<p class="meta">Your story is visible to you and your friends for 24 hours.</p><div>${pick("pf","image/*,video/*",false,"Choose a photo or video")}</div>`;
+  }
+}
+async function submitCreate(){
+  const btn = $("#cwpost"), files = [...$("#pf").files], cap = $("#pc") ? $("#pc").value.trim() : "", label = btn.textContent;
+  const fail = m => { toast(m); btn.disabled = false; btn.textContent = label; };
+  if (cwTab === "post") {
+    if (!files.length && !cap) return toast("Write something or choose a photo or video");
+    btn.disabled = true; btn.textContent = "Posting...";
+    const mf = files.length ? await buildMediaFields(files) : { image_path:null, media_type:"image", bg:chosenBg || null };
+    if (mf.error) return fail(mf.error.message);
+    const gid = $("#cwg").value, row = { author_id:me.id, caption:cap || null, ...mf }; if (gid) row.group_id = gid;
+    const r = await db.from("posts").insert(row); if (r.error) return fail(r.error.message);
+    toast("Posted"); closeCreate(); gid ? openGroup(gid) : go("home");
+  } else if (cwTab === "reel") {
+    if (!files.length || !files[0].type.startsWith("video/")) return toast("Choose a video first");
+    btn.disabled = true; btn.textContent = "Sharing...";
+    const up = await uploadMedia(files[0]); if (up.error) return fail(up.error.message);
+    const r = await db.from("posts").insert({ author_id:me.id, caption:cap || null, image_path:up.path, media_type:"video", is_reel:true }); if (r.error) return fail(r.error.message);
+    toast("Reel shared"); closeCreate(); go("reels");
+  } else {
+    if (!files.length) return toast("Choose a photo or video first");
+    btn.disabled = true; btn.textContent = "Adding...";
+    const up = await uploadMedia(files[0]); if (up.error) return fail(up.error.message);
+    const r = await db.from("stories").insert({ user_id:me.id, media_path:up.path, media_type:up.type }); if (r.error) return fail(r.error.message);
+    toast("Story added"); closeCreate(); tab === "chats" ? loadStories() : go("chats");
+  }
+}
 
 // ---------- Install as app ----------
 let deferred = null;
