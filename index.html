@@ -645,7 +645,7 @@ function toggleMenu(e){
   e.stopPropagation(); const m = $("#menu"); if (!m.hidden) { m.hidden = true; return; }
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
   m.innerHTML = (me ? `<button onclick="openProfile('${me.id}')">My profile</button>` : '<button onclick="go(\'login\')">Log in or sign up</button>')
-    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "");
+    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "") + '<div class="meta" style="padding:8px 12px">TUchat version 5 (chat pro)</div>';
   m.hidden = false;
 }
 document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; const g = document.getElementById("gmenu"); if (g) g.hidden = true; });
