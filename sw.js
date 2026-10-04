@@ -14,3 +14,8 @@ self.addEventListener("fetch", e => {
   e.respondWith(fetch(r).then(res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put(r, copy)); return res; })
     .catch(() => caches.match(r).then(m => m || caches.match("/"))));
 });
+
+self.addEventListener("notificationclick", e => {
+  e.notification.close();
+  e.waitUntil(clients.matchAll({ type:"window" }).then(cs => cs[0] ? cs[0].focus() : clients.openWindow("/")));
+});

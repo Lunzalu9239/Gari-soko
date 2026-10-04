@@ -157,6 +157,25 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 .badge{position:absolute;top:3px;left:calc(50% + 6px);background:#e0443e;color:#fff;font-size:.66rem;font-weight:700;min-width:17px;height:17px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px;animation:pop .35s ease}
 .sn{font-size:.74rem;font-weight:700;color:var(--accent);margin-bottom:2px}.m.me .sn{display:none}
 .gp{display:flex;gap:8px;align-items:center;padding:6px 0;cursor:pointer}.gp input{width:auto}
+.collage{display:grid;gap:3px;height:360px;background:var(--bg)}
+.collage > *{width:100%;height:100%;min-height:0;object-fit:cover;display:block;cursor:pointer;background:var(--line)}
+.L-side{grid-template-columns:1fr 1fr}.L-stack{grid-template-rows:1fr 1fr}
+.L-big-left{grid-template-columns:2fr 1fr;grid-template-rows:1fr 1fr}.L-big-left > :first-child{grid-row:span 2}
+.L-big-top{grid-template-columns:1fr 1fr;grid-template-rows:2fr 1fr}.L-big-top > :first-child{grid-column:span 2}
+.L-row3{grid-template-columns:repeat(3,1fr)}
+.L-grid4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.L-big-top4{grid-template-columns:repeat(3,1fr);grid-template-rows:2fr 1fr}.L-big-top4 > :first-child{grid-column:span 3}
+.L-mosaic5{grid-template-columns:repeat(6,1fr);grid-template-rows:1fr 1fr}.L-mosaic5 > :nth-child(-n+2){grid-column:span 3}.L-mosaic5 > :nth-child(n+3){grid-column:span 2}
+.L-grid6{grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr}
+.lay{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.lopt{border:2px solid var(--line);border-radius:10px;padding:3px;background:var(--card);cursor:pointer}.lopt.sel{border-color:var(--accent)}
+.lopt .collage{width:52px;height:52px;gap:2px}.lopt .collage > *{cursor:pointer}
+#lightbox{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:70;display:flex;align-items:center;justify-content:center}#lightbox img{max-width:100%;max-height:100%}
+#copymenu{position:fixed;z-index:80;background:#1f2933;color:#fff;border-radius:10px;padding:3px;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+#copymenu button{background:none;border:0;color:#fff;padding:9px 18px;font:inherit;cursor:pointer}
+.m,.cap,.ans > div{-webkit-user-select:text;user-select:text}
+#hn{position:relative;overflow:visible}.nbadge{position:absolute;top:-3px;right:-3px;background:#e0443e;color:#fff;font-size:.65rem;font-weight:700;min-width:17px;height:17px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+.nbadge[hidden]{display:none}#hn #ni{display:flex}
 </style>
 </head>
 <body>
@@ -164,6 +183,7 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 <div class="l"><button id="back" class="circ" style="display:none" onclick="goBack()" aria-label="Go back">←</button><h1><svg class="lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/></svg>TU<b>chat</b></h1></div>
 <div class="r"><button id="hs" class="circ" onclick="go('search')" aria-label="Search"></button>
 <button id="hi" class="circ" onclick="go('home')" aria-label="Create a post"></button>
+<button id="hn" class="circ" onclick="go('notifs')" aria-label="Notifications"><span id="ni"></span><span id="nb" class="nbadge" hidden></span></button>
 <div style="position:relative"><button id="hp" class="circ" onclick="toggleMenu(event)" aria-label="Profile and settings"></button><div id="menu" class="menu" hidden></div></div></div>
 </header><nav id="nav"></nav></div>
 <main id="view"></main>
@@ -190,9 +210,9 @@ async function refreshUser(){
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
   if (!booted) { booted = true; if (me) { tab = "chats"; history.replaceState({ name:"tab", arg:"chats", d:0 }, ""); } }
   $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
-  drawNav(); render(); if (me) updateBadge(); else unreadN = 0;
+  drawNav(); render(); if (me) { updateBadge(); startNotifs(); } else unreadN = 0;
 }
-async function logout(){ await db.auth.signOut(); tab="home"; refreshUser(); }
+async function logout(){ if (nchan) { db.removeChannel(nchan); nchan = null; } setNB(0); await db.auth.signOut(); tab="home"; refreshUser(); }
 
 function drawNav(){
   const t = [["home","Home"]];
@@ -200,10 +220,10 @@ function drawNav(){
   t.push(["reels","Reels"],["groups","Groups"]);
   if (me) t.push(["friends","Friends"]);
   $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}${k === "chats" && unreadN ? `<span class="badge">${unreadN > 9 ? "9+" : unreadN}</span>` : ""}</button>`).join("");
-  $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "home");
+  $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "home"); $("#hn").classList.toggle("on", tab === "notifs");
 }
 function go(t, quiet){ closeSheet(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
-function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends, chats, reels})[tab] || (() => {}))(); }
+function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends, chats, reels, notifs})[tab] || (() => {}))(); }
 
 // ---------- Browse ----------
 async function browse(){
@@ -416,8 +436,8 @@ function postHtml(p){
   const up = v.filter(x=>x.value===1).length, dn = v.filter(x=>x.value===-1).length;
   const nc = p.post_comments?.[0]?.count || 0;
   const own = me && (me.id === p.author_id || profile?.role === "admin");
-  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
-  ${p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
+  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div class="cap" style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
+  ${p.more_paths?.length ? collageHtml(p) : p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
   <div class="body">
   <div class="row acts"><button class="btn alt ${mine===1?"sel":""}" onclick="vote('${p.id}',1)">👍 ${up}</button>
   <button class="btn alt ${mine===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎 ${dn}</button>
@@ -566,7 +586,7 @@ async function openProfile(uid, quiet){
   $("#view").innerHTML = `<div class="panel" style="max-width:640px;margin:0 auto 14px"><div style="display:flex;gap:14px;align-items:center">
     <div class="avatar big">${avatarInner(u)}</div><div><h2 style="margin:0">${esc(u.business_name || u.full_name || "User")}${crown(n)}${tick(u.verified)}</h2>
     <div class="meta">${u.verified ? "Verified account" : ""}${u.verified && u.town ? " · " : ""}${esc(u.town || "")}</div></div></div>
-    ${u.bio ? `<p>${esc(u.bio)}</p>` : ""}
+    ${u.bio ? `<p class="cap">${esc(u.bio)}</p>` : ""}
     <div class="meta"><strong>${n}</strong> followers · <strong>${fg.count || 0}</strong> following · <strong>${ps.data.length}</strong> photos · ${next}</div>
     ${mine ? "" : `<div class="row"><button class="btn ${following ? "alt" : ""}" onclick="toggleFollow('${uid}',${following})">${following ? "Following ✓" : "Follow"}</button>${friendBtn(fr.data, uid)}</div>`}</div>
     ${mine ? `<div class="panel" style="max-width:640px;margin:0 auto 14px"><h3>Edit profile</h3><form class="f" id="pf2">
@@ -601,12 +621,12 @@ let depth = 0;
 function upBack(){ const b = document.getElementById("back"); if (b) b.style.display = depth > 0 ? "inline-flex" : "none"; }
 function push(name, arg){ history.pushState({ name, arg, d: ++depth }, ""); upBack(); }
 function goBack(){ if (depth > 0) history.back(); else go(me ? "chats" : "home", true); }
-function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), gc:()=>openGc(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
+function restore(st){ ({ tab:()=>go(st.arg,true), car:()=>openCar(st.arg,true), profile:()=>openProfile(st.arg,true), dm:()=>openDm(st.arg,true), gc:()=>openGc(st.arg,true), post:()=>openPost(st.arg,true), group:()=>openGroup(st.arg,true) })[st.name]?.(); }
 window.addEventListener("popstate", e => { const st = e.state; depth = st?.d || 0; closeSheet(); upBack(); if (!st) { go(me ? "chats" : "home", true); return; } restore(st); });
 history.replaceState({ name:"tab", arg:"home", d:0 }, "");
 
 // ---------- Groups ----------
-const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count,verified),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name),media_type";
+const POST_SEL = "id,caption,image_path,created_at,author_id,group_id,profiles!posts_author_id_fkey(full_name,avatar_path,followers_count,verified),post_votes(user_id,value),post_comments(count),groups!posts_group_id_fkey(name),media_type,more_paths,layout";
 let feedRender = null, homeItems = [];
 let gsetOpen = false;
 function joinBtn(gid, st, privacy, where){
@@ -681,14 +701,15 @@ async function openGroup(gid, quiet){
     $("#gsf").onsubmit = async e => { e.preventDefault(); const f = new FormData(e.target);
       const r = await db.from("groups").update({ name:f.get("name").trim(), description:f.get("description") || null, privacy:f.get("privacy") }).eq("id",gid);
       toast(r.error ? r.error.message : "Settings saved"); openGroup(gid, true); }; }
-  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(G.name)}</h3>${pick("pf","image/*,video/*",false,"Add photo or video")}<div style="height:8px"></div>
-    <input id="pc" placeholder="Say something (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="pb">Post</button></div>`
+  $("#comp").innerHTML = member ? `<div class="panel"><h3>Post in ${esc(G.name)}</h3>${pick("pf","image/*,video/*",true,"Add photos or video")}<div style="height:8px"></div>
+    <input id="pc" placeholder="Say something (optional)" maxlength="500"><div style="height:8px"></div><button class="btn" id="pb">Post</button><div id="lay"></div></div>`
     : `<div class="panel meta">${canSee ? "Join this group to post here." : "🔒 This is a private group. Request to join to see its posts."}</div>`;
+  if (member) $("#pf").addEventListener("change", showLayouts);
   if (member) $("#pb").onclick = async () => {
-    const f = $("#pf").files[0]; if (!f) return toast("Choose a photo or video first");
+    const files = [...$("#pf").files]; if (!files.length) return toast("Choose a photo or video first");
     $("#pb").disabled = true; $("#pb").textContent = "Posting...";
-    const up = await uploadMedia(f);
-    if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, image_path:up.path, media_type:up.type }); toast(r.error ? r.error.message : "Posted"); }
+    const mf = await buildMediaFields(files);
+    if (mf.error) toast(mf.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, group_id:gid, caption:$("#pc").value.trim() || null, ...mf }); toast(r.error ? r.error.message : "Posted"); }
     openGroup(gid, true);
   };
   if (!canSee) { $("#plist").innerHTML = ""; return; }
@@ -708,15 +729,16 @@ async function home(){
   feedRender = null;
   $("#view").innerHTML = '<div class="feedcol"><div id="comp"></div><div id="plist"><div class="empty">Loading...</div></div></div>';
   $("#comp").innerHTML = me ? `<div class="panel"><div style="display:flex;gap:10px;align-items:center"><span class="avatar sm">${avatarInner(profile)}</span><input id="pc" placeholder="What's on your mind?" maxlength="500"></div>
-    <div class="send" style="margin-top:10px;justify-content:space-between">${pick("pf","image/*,video/*",false,"Photo or video")}<button class="btn" id="pb">Post</button></div></div>`
+    <div class="send" style="margin-top:10px;justify-content:space-between">${pick("pf","image/*,video/*",true,"Photos or video")}<button class="btn" id="pb">Post</button></div><div id="lay"></div></div>`
     : '<div class="panel">Log in to share posts. <a href="#" class="un" onclick="go(\'login\');return false">Log in or sign up</a></div>';
   if (me) $("#pb").onclick = async () => {
-    const f = $("#pf").files[0]; if (!f) return toast("Choose a photo or video first");
+    const files = [...$("#pf").files]; if (!files.length) return toast("Choose a photo or video first");
     $("#pb").disabled = true; $("#pb").textContent = "Posting...";
-    const up = await uploadMedia(f);
-    if (up.error) toast(up.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, caption:$("#pc").value.trim() || null, image_path:up.path, media_type:up.type }); toast(r.error ? r.error.message : "Posted"); }
+    const mf = await buildMediaFields(files);
+    if (mf.error) toast(mf.error.message); else { const r = await db.from("posts").insert({ author_id:me.id, caption:$("#pc").value.trim() || null, ...mf }); toast(r.error ? r.error.message : "Posted"); }
     home();
   };
+  if (me) $("#pf").addEventListener("change", showLayouts);
   const [ps, mm] = await Promise.all([
     db.from("posts").select(POST_SEL).eq("is_reel", false).order("created_at",{ascending:false}).limit(60),
     me ? db.from("group_members").select("group_id").eq("user_id",me.id).eq("status","active") : Promise.resolve({data:[]})]);
@@ -731,7 +753,7 @@ function reelHtml(p){
   const v = p.post_votes || [], my = v.find(x => x.user_id === me?.id)?.value, up = v.filter(x=>x.value===1).length, dn = v.filter(x=>x.value===-1).length, nc = p.post_comments?.[0]?.count || 0;
   return `<section class="reel"><video class="rv" src="${photoUrl(p.image_path)}" loop muted playsinline preload="metadata" onclick="this.paused?this.play():this.pause()"></video>
   <button class="rmute" aria-label="Sound" onclick="reelMuted=!reelMuted;document.querySelectorAll('video.rv').forEach(x=>x.muted=reelMuted);this.textContent=reelMuted?'🔇':'🔊'">${reelMuted ? "🔇" : "🔊"}</button>
-  <div class="rcap"><strong>${nameLink(p.profiles,p.author_id)}</strong>${p.caption ? `<div>${esc(p.caption)}</div>` : ""}</div>
+  <div class="rcap"><strong>${nameLink(p.profiles,p.author_id)}</strong>${p.caption ? `<div class="cap">${esc(p.caption)}</div>` : ""}</div>
   <div class="racts"><button class="${my===1?"sel":""}" onclick="vote('${p.id}',1)">👍<span>${up}</span></button><button class="${my===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎<span>${dn}</span></button><button onclick="toggleC('${p.id}')">💬<span>${nc}</span></button></div></section>`;
 }
 async function reels(){
@@ -850,7 +872,7 @@ async function openDm(uid, quiet){
     if (r.error) { toast("You can only chat privately with friends"); return go("friends", true); } t = r.data; }
   const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count,verified").eq("id",uid).single(),
     db.from("dm_messages").select("*").eq("thread_id",t.id).order("created_at")]);
-  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curKind = "dm"; bnames = null; curThread = t.id;
+  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curKind = "dm"; bnames = null; db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("ref_id",t.id).eq("type","message").then(() => nbRefresh()); curThread = t.id;
   $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><button class="avatar" onclick="openProfile('${uid}')">${avatarInner(pr.data)}</button>
     <div><div style="font-weight:700">${nameLink(pr.data,uid)}</div><div class="meta">Private chat</div></div></div>
     <div class="msgs" id="ms">${(ms.data||[]).map(bubble).join("")}</div>
@@ -965,7 +987,7 @@ async function openGc(id, quiet){
     db.from("gchat_messages").select("*").eq("chat_id",id).order("created_at")]);
   if (g.error) { toast("This group chat is not available"); return go("chats", true); }
   bnames = {}; (mem.data || []).forEach(x => { bnames[x.user_id] = x.profiles?.full_name || "User"; });
-  curThread = id; curKind = "gc"; shown = new Set((ms.data || []).map(m => m.id)); markSeen(id);
+  curThread = id; curKind = "gc"; shown = new Set((ms.data || []).map(m => m.id)); markSeen(id); db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("ref_id",id).eq("type","group_message").then(() => nbRefresh());
   const names = Object.values(bnames).join(", ");
   $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><span class="avatar" style="cursor:default">${esc(g.data.name.charAt(0).toUpperCase())}</span>
     <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(g.data.name)}</div><div class="meta csub">${esc(names)}</div></div><button class="lnk" onclick="leaveGc('${id}')">Leave</button></div>
@@ -1024,6 +1046,86 @@ async function recStart(){
   } catch (e) { toast("Allow microphone access to record voice notes"); }
 }
 function recStop(send){ recSend = send; if (rec && rec.state !== "inactive") rec.stop(); }
+
+// ---------- Photo collages ----------
+const LAYOUTS = { 2:["side","stack"], 3:["big-left","big-top","row3"], 4:["grid4","big-top4"], 5:["mosaic5"], 6:["grid6"] };
+let chosenLayout = "";
+const collageHtml = p => `<div class="collage L-${p.layout || "grid4"}">${[p.image_path, ...p.more_paths].map(x => `<img src="${photoUrl(x)}" loading="lazy" alt="" onclick="openImg(this.src)">`).join("")}</div>`;
+function openImg(src){ const d = document.createElement("div"); d.id = "lightbox"; d.onclick = () => d.remove(); d.innerHTML = `<img src="${src}" alt="">`; document.body.appendChild(d); }
+function showLayouts(){
+  const box = $("#lay"); if (!box) return; const fs = [...$("#pf").files];
+  if (fs.length < 2) { box.innerHTML = ""; chosenLayout = ""; return; }
+  if (fs.some(f => !f.type.startsWith("image/"))) { box.innerHTML = '<div class="meta" style="margin-top:8px">Choose one video, or up to 6 photos.</div>'; chosenLayout = ""; return; }
+  const n = Math.min(fs.length, 6), opts = LAYOUTS[n]; if (!opts.includes(chosenLayout)) chosenLayout = opts[0];
+  box.innerHTML = `<div class="meta" style="margin-top:8px">${fs.length > 6 ? "Only the first 6 photos are used. " : ""}Choose a layout</div><div class="lay">${opts.map(o => `<button type="button" class="lopt ${o === chosenLayout ? "sel" : ""}" onclick="pickLayout('${o}',this)" aria-label="Layout ${o}"><div class="collage L-${o}">${"<div></div>".repeat(n)}</div></button>`).join("")}</div>`;
+}
+function pickLayout(o, btn){ chosenLayout = o; document.querySelectorAll(".lopt").forEach(b => b.classList.toggle("sel", b === btn)); }
+async function buildMediaFields(files){
+  if (files.length === 1) { const up = await uploadMedia(files[0]); return up.error ? { error:up.error } : { image_path:up.path, media_type:up.type }; }
+  if (files.some(f => !f.type.startsWith("image/"))) return { error:{ message:"Choose one video, or up to 6 photos" } };
+  const fs = files.slice(0, 6), paths = [];
+  for (const f of fs) { const up = await uploadMedia(f); if (up.error) return { error:up.error }; paths.push(up.path); }
+  return { image_path:paths[0], media_type:"image", more_paths:paths.slice(1), layout: chosenLayout || LAYOUTS[fs.length][0] };
+}
+
+// ---------- Copy menu on long press ----------
+const COPYSEL = ".m, .cap, .ans > div"; let copyAt = 0, lpT = null;
+function hideCopy(){ document.getElementById("copymenu")?.remove(); }
+function showCopy(el, x, y){
+  hideCopy(); const c = el.cloneNode(true); c.querySelectorAll(".bt,.sn,audio,img,button,svg").forEach(n => n.remove());
+  const text = c.textContent.trim(); if (!text) return; window.getSelection()?.removeAllRanges(); copyAt = Date.now();
+  const m = document.createElement("div"); m.id = "copymenu"; m.innerHTML = "<button>Copy</button>"; m.onclick = e => e.stopPropagation();
+  m.firstChild.onclick = async () => { try { await navigator.clipboard.writeText(text); } catch (_) { const t = document.createElement("textarea"); t.value = text; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove(); } hideCopy(); toast("Copied"); };
+  document.body.appendChild(m); m.style.left = Math.max(8, Math.min(x - 30, innerWidth - 110)) + "px"; m.style.top = Math.max(8, y - 56) + "px";
+}
+document.addEventListener("touchstart", e => { const el = e.target.closest(COPYSEL); if (!el || e.touches.length !== 1) return; const t = e.touches[0]; clearTimeout(lpT); lpT = setTimeout(() => showCopy(el, t.clientX, t.clientY), 450); }, { passive:true });
+["touchend", "touchmove", "touchcancel", "scroll"].forEach(ev => document.addEventListener(ev, () => clearTimeout(lpT), { passive:true }));
+document.addEventListener("contextmenu", e => { const el = e.target.closest(COPYSEL); if (!el) return; e.preventDefault(); showCopy(el, e.clientX, e.clientY); });
+document.addEventListener("click", () => { if (Date.now() - copyAt > 400) hideCopy(); });
+
+// ---------- Notifications ----------
+ICON.bell = _i('<path d="M6 17V11a6 6 0 1 1 12 0v6l2 2H4z"/><path d="M10 21h4"/>');
+$("#ni").innerHTML = ICON.bell;
+let nchan = null, nlist = [];
+const ntext = n => ({ friend_request:"sent you a friend request", friend_accept:"accepted your friend request", comment:"commented on your post", reply:"replied to your comment", message:"sent you a message", group_message:"sent a message in a group chat" })[n.type] || "sent you a notification";
+function setNB(n){ const e = document.getElementById("nb"); if (!e) return; e.hidden = !n; e.textContent = n > 9 ? "9+" : n; }
+async function nbRefresh(){ if (!me) return setNB(0); const r = await db.from("notifications").select("id",{count:"exact",head:true}).eq("user_id",me.id).eq("read",false); setNB(r.count || 0); }
+function startNotifs(){
+  if (nchan) return; nbRefresh();
+  nchan = db.channel("notif"+me.id).on("postgres_changes", { event:"*", schema:"public", table:"notifications", filter:"user_id=eq."+me.id }, async p => {
+    const n = p.new; nbRefresh(); if (!n || n.read) return;
+    if ((n.type === "message" || n.type === "group_message") && tab === "chats" && curThread === n.ref_id) { db.from("notifications").update({ read:true }).eq("id",n.id).then(() => nbRefresh()); return; }
+    const a = n.actor_id ? (await db.from("profiles").select("full_name").eq("id",n.actor_id).maybeSingle()).data : null;
+    const text = `${a?.full_name || "Someone"} ${ntext(n)}`; toast(text);
+    if ("Notification" in window && Notification.permission === "granted") navigator.serviceWorker?.ready.then(r => r.showNotification("TUchat", { body:text, icon:"/icon-192.png" })).catch(() => {});
+  }).subscribe();
+}
+function enableAlerts(){ Notification.requestPermission().then(() => notifs()); }
+async function notifs(){
+  feedRender = null; if (!me) return go("login");
+  $("#view").innerHTML = '<div class="feedcol"><div class="empty">Loading...</div></div>';
+  const { data, error } = await db.from("notifications").select("id,type,ref_id,body,read,created_at,actor_id,actor:profiles!notifications_actor_id_fkey(id,full_name,avatar_path,followers_count,verified)").order("created_at",{ascending:false}).limit(50);
+  if (error) { $("#view").innerHTML = `<div class="empty">${esc(error.message)}</div>`; return; }
+  nlist = data;
+  const ask = ("Notification" in window && Notification.permission === "default") ? '<div class="panel">Get alerts on this device while TUchat is open or in the background. <button class="btn" style="margin-top:8px" onclick="enableAlerts()">Turn on alerts</button></div>' : "";
+  $("#view").innerHTML = `<div class="feedcol">${ask}${data.map((n, i) => `<div class="crow ${n.read ? "" : "unread"}" onclick="openNotif(${i})"><div class="avatar">${avatarInner(n.actor)}</div>
+    <div class="cbody"><div class="ctop"><strong>${esc(n.actor?.full_name || "Someone")}</strong>${tick(n.actor?.verified)}<span class="meta">${ago(n.created_at)}</span></div>
+    <div class="csub">${ntext(n)}${n.body ? ": " + esc(n.body) : ""}</div></div>${n.read ? "" : '<span class="dot"></span>'}</div>`).join("") || '<div class="empty">No notifications yet.</div>'}</div>`;
+  if (data.some(n => !n.read)) { await db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("read",false); nbRefresh(); }
+}
+function openNotif(i){
+  const n = nlist[i]; if (!n) return;
+  if (n.type === "friend_request") go("friends"); else if (n.type === "friend_accept") openProfile(n.actor_id);
+  else if (n.type === "comment" || n.type === "reply") openPost(n.ref_id);
+  else if (n.type === "message") openDm(n.actor_id); else if (n.type === "group_message") openGc(n.ref_id);
+}
+async function openPost(id, quiet){
+  closeSheet(); tab = ""; drawNav(); if (!quiet) push("post", id); feedRender = null;
+  $("#view").innerHTML = '<div class="feedcol"><div id="plist"><div class="empty">Loading post...</div></div></div>';
+  const r = await db.from("posts").select(POST_SEL).eq("id",id).maybeSingle();
+  if (!r.data) { $("#plist").innerHTML = '<div class="empty">This post is no longer available.</div>'; return; }
+  posts = [r.data]; drawFeed(); toggleC(id);
+}
 
 // ---------- Install as app ----------
 let deferred = null;
