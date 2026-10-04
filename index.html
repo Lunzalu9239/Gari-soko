@@ -176,6 +176,28 @@ nav .ic.on svg,.circ.on svg{animation:pop .38s ease}
 .m,.cap,.ans > div{-webkit-user-select:text;user-select:text}
 #hn{position:relative;overflow:visible}.nbadge{position:absolute;top:-3px;right:-3px;background:#e0443e;color:#fff;font-size:.65rem;font-weight:700;min-width:17px;height:17px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 4px}
 .nbadge[hidden]{display:none}#hn #ni{display:flex}
+.fbtn{background:var(--accent);color:var(--on-accent);border:0;border-radius:99px;padding:2px 11px;font:inherit;font-size:.78rem;font-weight:700;cursor:pointer;margin-left:8px;vertical-align:1px}
+.fbtn:active{transform:scale(.92)}.rcap .fbtn{background:#fff;color:#1f2933}
+.abar{display:flex;margin:4px -12px -12px;background:var(--head);border-top:1px solid var(--line)}
+.ab{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:0;color:var(--ink);padding:7px 4px;cursor:pointer;font:inherit;font-size:.85rem;transition:transform .12s}
+.ab svg{width:20px;height:20px}.ab:active{transform:scale(.88)}.ab.sel{color:var(--accent)}.ab.sel svg{fill:var(--accent);fill-opacity:.2}
+.flip{transform:rotate(180deg)}
+.racts svg{width:22px;height:22px}
+.stories{display:flex;gap:14px;overflow-x:auto;padding:4px 2px 12px;margin-bottom:6px}
+.sbub{flex:none;width:72px;text-align:center;cursor:pointer}
+.sring{position:relative;width:68px;height:68px;margin:0 auto}.sring .ring{position:absolute;inset:0}
+.sprev{position:absolute;left:7px;top:7px;width:54px;height:54px;border-radius:50%;object-fit:cover;background:var(--line) center/cover no-repeat}
+.sprev.av{display:flex;align-items:center;justify-content:center;font-weight:800;font-size:1.3rem;background:var(--accent);color:var(--on-accent);overflow:hidden}.sprev.av img{width:100%;height:100%;object-fit:cover}
+.splus{position:absolute;right:-2px;bottom:-2px;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--on-accent);border:2px solid var(--card);display:flex;align-items:center;justify-content:center;font-weight:800;cursor:pointer;line-height:1}
+.sname{font-size:.74rem;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#storyview{position:fixed;inset:0;background:#000;z-index:90;display:flex;align-items:center;justify-content:center}
+.sv-media{max-width:100%;max-height:100%;object-fit:contain}
+.sv-bars{position:absolute;top:10px;left:10px;right:10px;display:flex;gap:4px;z-index:3}
+.sv-bars span{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.35);overflow:hidden;position:relative}
+.sv-bars span.done{background:#fff}.sv-bars span.cur::after{content:"";position:absolute;inset:0;background:#fff;transform-origin:left;animation:svp 5s linear forwards}
+@keyframes svp{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.sv-head{position:absolute;top:22px;left:12px;right:12px;display:flex;gap:8px;align-items:center;color:#fff;z-index:3}
+.sv-prev,.sv-next{position:absolute;top:70px;bottom:0;width:40%;z-index:2}.sv-prev{left:0}.sv-next{right:0}
 </style>
 </head>
 <body>
@@ -210,7 +232,7 @@ async function refreshUser(){
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
   if (!booted) { booted = true; if (me) { tab = "chats"; history.replaceState({ name:"tab", arg:"chats", d:0 }, ""); } }
   $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
-  drawNav(); render(); if (me) { updateBadge(); startNotifs(); } else unreadN = 0;
+  drawNav(); render(); if (me) { updateBadge(); startNotifs(); loadFollows(); } else unreadN = 0;
 }
 async function logout(){ if (nchan) { db.removeChannel(nchan); nchan = null; } setNB(0); await db.auth.signOut(); tab="home"; refreshUser(); }
 
@@ -222,7 +244,7 @@ function drawNav(){
   $("#nav").innerHTML = t.map(([k,v]) => `<button class="ic ${k===tab?"on":""}" title="${v}" aria-label="${v}" onclick="go('${k}')">${ICON[k]}${k === "chats" && unreadN ? `<span class="badge">${unreadN > 9 ? "9+" : unreadN}</span>` : ""}</button>`).join("");
   $("#hs").classList.toggle("on", tab === "search"); $("#hi").classList.toggle("on", tab === "home"); $("#hn").classList.toggle("on", tab === "notifs");
 }
-function go(t, quiet){ closeSheet(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
+function go(t, quiet){ closeSheet(); closeStory(); tab=t; drawNav(); render(); if (!quiet) push("tab", t); }
 function render(){ (({home, browse, sell, admin, login, mech, chat, feed, groups, search, friends, chats, reels, notifs})[tab] || (() => {}))(); }
 
 // ---------- Browse ----------
@@ -436,13 +458,9 @@ function postHtml(p){
   const up = v.filter(x=>x.value===1).length, dn = v.filter(x=>x.value===-1).length;
   const nc = p.post_comments?.[0]?.count || 0;
   const own = me && (me.id === p.author_id || profile?.role === "admin");
-  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong><div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div class="cap" style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
+  return `<article class="car" style="margin-bottom:14px"><div class="body"><div style="display:flex;gap:8px;align-items:center"><button class="avatar sm" onclick="openProfile('${p.author_id}')">${avatarInner(p.profiles)}</button><div><strong>${nameLink(p.profiles,p.author_id)}</strong>${followBtn(p.author_id)}<div class="meta">${ago(p.created_at)}${p.groups ? ` · in <strong>${esc(p.groups.name)}</strong>` : ""}</div></div></div>${p.caption?`<div class="cap" style="margin-top:6px">${esc(p.caption)}</div>`:""}</div>
   ${p.more_paths?.length ? collageHtml(p) : p.media_type === "video" ? `<video class="pimg" src="${photoUrl(p.image_path)}" controls preload="metadata" playsinline></video>` : `<img class="pimg" src="${photoUrl(p.image_path)}" loading="lazy" alt="">`}
-  <div class="body">
-  <div class="row acts"><button class="btn alt ${mine===1?"sel":""}" onclick="vote('${p.id}',1)">👍 ${up}</button>
-  <button class="btn alt ${mine===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎 ${dn}</button>
-  <button class="btn alt" onclick="toggleC('${p.id}')">💬 ${nc} comment${nc===1?"":"s"}</button></div>
-  <div>${own?`<button class="lnk" onclick="delPost('${p.id}')">Delete</button>`:`<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div></div></article>`;
+  <div class="body" style="gap:0"><div style="text-align:right">${own ? `<button class="lnk" onclick="delPost('${p.id}')">Delete</button>` : `<button class="lnk" onclick="reportPost('${p.id}')">Report</button>`}</div>${actBar(p, up, dn, nc, mine)}</div></article>`;
 }
 function drawFeed(){
   const y = window.scrollY, vt = {}; document.querySelectorAll("#plist video").forEach(v => { vt[v.getAttribute("src")] = v.currentTime; });
@@ -613,7 +631,7 @@ async function toggleFollow(uid, isFollowing){
   if (!me) { toast("Log in to follow people"); return go("login"); }
   const r = isFollowing ? await db.from("follows").delete().eq("follower_id",me.id).eq("followee_id",uid)
                         : await db.from("follows").insert({ follower_id:me.id, followee_id:uid });
-  if (r.error) toast(r.error.message); openProfile(uid, true);
+  if (r.error) toast(r.error.message); else { isFollowing ? myFollows.delete(uid) : myFollows.add(uid); } openProfile(uid, true);
 }
 
 // ---------- Back button (step by step) ----------
@@ -753,8 +771,8 @@ function reelHtml(p){
   const v = p.post_votes || [], my = v.find(x => x.user_id === me?.id)?.value, up = v.filter(x=>x.value===1).length, dn = v.filter(x=>x.value===-1).length, nc = p.post_comments?.[0]?.count || 0;
   return `<section class="reel"><video class="rv" src="${photoUrl(p.image_path)}" loop muted playsinline preload="metadata" onclick="this.paused?this.play():this.pause()"></video>
   <button class="rmute" aria-label="Sound" onclick="reelMuted=!reelMuted;document.querySelectorAll('video.rv').forEach(x=>x.muted=reelMuted);this.textContent=reelMuted?'🔇':'🔊'">${reelMuted ? "🔇" : "🔊"}</button>
-  <div class="rcap"><strong>${nameLink(p.profiles,p.author_id)}</strong>${p.caption ? `<div class="cap">${esc(p.caption)}</div>` : ""}</div>
-  <div class="racts"><button class="${my===1?"sel":""}" onclick="vote('${p.id}',1)">👍<span>${up}</span></button><button class="${my===-1?"sel":""}" onclick="vote('${p.id}',-1)">👎<span>${dn}</span></button><button onclick="toggleC('${p.id}')">💬<span>${nc}</span></button></div></section>`;
+  <div class="rcap"><strong>${nameLink(p.profiles,p.author_id)}</strong>${followBtn(p.author_id)}${p.caption ? `<div class="cap">${esc(p.caption)}</div>` : ""}</div>
+  <div class="racts"><button class="${my===1?"sel":""}" onclick="vote('${p.id}',1)">${ICON.like}<span>${up}</span></button><button class="${my===-1?"sel":""}" onclick="vote('${p.id}',-1)">${ICON.like.replace("<svg","<svg class='flip'")}<span>${dn}</span></button><button onclick="toggleC('${p.id}')">${ICON.chat}<span>${nc}</span></button><button onclick="sharePost('${p.id}')">${ICON.share}</button></div></section>`;
 }
 async function reels(){
   feedRender = null;
@@ -939,9 +957,9 @@ setInterval(() => { if (me && !document.hidden) updateBadge(); }, 45000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && me) updateBadge(); });
 async function chats(){
   feedRender = null; if (!me) return go("login");
-  $("#view").innerHTML = `<div class="feedcol"><div class="send" style="margin-bottom:10px"><input id="cq" placeholder="Search chats">
+  $("#view").innerHTML = `<div class="feedcol"><div id="stories" class="stories"></div><div class="send" style="margin-bottom:10px"><input id="cq" placeholder="Search chats">
     <button class="btn" onclick="newChat()" aria-label="Start a new chat" style="padding:8px 12px">${ICON.friends.replace("<svg","<svg class='bi'")}</button></div><div id="nc"></div><div id="cl"><div class="empty">Loading chats...</div></div></div>`;
-  $("#cq").oninput = drawInbox;
+  $("#cq").oninput = drawInbox; loadStories();
   const r = await loadInbox(); if (r.error) { $("#cl").innerHTML = `<div class="empty">${esc(r.error.message)}</div>`; return; }
   drawInbox();
 }
@@ -1127,6 +1145,72 @@ async function openPost(id, quiet){
   posts = [r.data]; drawFeed(); toggleC(id);
 }
 
+// ---------- Follow button, icon action bar, share ----------
+let myFollows = new Set();
+ICON.like = _i('<path d="M7 11v9H4v-9z"/><path d="M7 11l4-8c1.6 0 2.6 1 2.6 2.5V9h5.1a1.8 1.8 0 0 1 1.8 2.1l-1.3 7.2A2 2 0 0 1 17.2 20H7"/>');
+ICON.share = _i('<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="M8.2 10.8l7.6-4.4M8.2 13.2l7.6 4.4"/>');
+async function loadFollows(){ if (!me) { myFollows = new Set(); return; } const { data } = await db.from("follows").select("followee_id").eq("follower_id",me.id); myFollows = new Set((data || []).map(x => x.followee_id)); }
+const followBtn = uid => (uid && uid !== me?.id && !myFollows.has(uid)) ? `<button class="fbtn" onclick="quickFollow('${uid}')">Follow</button>` : "";
+async function quickFollow(uid){
+  if (!me) { toast("Log in to follow people"); return go("login"); }
+  const r = await db.from("follows").insert({ follower_id:me.id, followee_id:uid }); if (r.error) return toast(r.error.message);
+  myFollows.add(uid); drawFeed(); toast("Following");
+}
+const actBar = (p, up, dn, nc, mine) => `<div class="abar"><button class="ab ${mine===1?"sel":""}" onclick="vote('${p.id}',1)" aria-label="Like">${ICON.like}<span>${up}</span></button>
+  <button class="ab ${mine===-1?"sel":""}" onclick="vote('${p.id}',-1)" aria-label="Dislike">${ICON.like.replace("<svg","<svg class='flip'")}<span>${dn}</span></button>
+  <button class="ab" onclick="toggleC('${p.id}')" aria-label="Comments">${ICON.chat}<span>${nc}</span></button>
+  <button class="ab" onclick="sharePost('${p.id}')" aria-label="Share">${ICON.share}</button></div>`;
+async function sharePost(id){
+  const url = `${location.origin}/?post=${id}`;
+  if (navigator.share) { try { await navigator.share({ title:"TUchat", text:"Check out this post on TUchat", url }); return; } catch (e) { if (e.name === "AbortError") return; } }
+  try { await navigator.clipboard.writeText(url); toast("Link copied"); } catch (e) { prompt("Copy this link:", url); }
+}
+
+// ---------- Stories (24 hours) ----------
+let stGroups = [], svI = 0, svG = null, svT = null;
+const ring = (n, size) => { const r = size/2 - 3, C = 2*Math.PI*r, gap = n > 1 ? 6 : 0, seg = (C/Math.max(n,1) - gap).toFixed(1);
+  return `<svg class="ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--accent)" stroke-width="3" stroke-linecap="round" stroke-dasharray="${seg} ${gap}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`; };
+function storyBubble(g, i){
+  const own = g.uid === me.id, last = g.items[g.items.length - 1], url = last ? photoUrl(last.media_path) : "";
+  const prev = last ? (last.media_type === "video" ? `<video class="sprev" src="${url}#t=0.1" muted playsinline preload="metadata"></video>` : `<div class="sprev" style="background-image:url('${url}')"></div>`)
+                    : `<div class="sprev av">${avatarInner(g.p)}</div>`;
+  const add = own ? `<label class="splus" onclick="event.stopPropagation()" title="Add to your story">+<input type="file" accept="image/*,video/*" hidden onchange="addStory(this)"></label>` : "";
+  return `<div class="sbub" onclick="openStory(${i})"><div class="sring">${g.items.length ? ring(g.items.length, 68) : ""}${prev}${add}</div><div class="sname">${own ? "Your story" : esc((g.p?.full_name || "").split(" ")[0])}</div></div>`;
+}
+async function loadStories(){
+  const box = $("#stories"); if (!box || !me) return;
+  const { data } = await db.from("stories").select("id,user_id,media_path,media_type,created_at,profiles!stories_user_id_fkey(id,full_name,avatar_path,followers_count,verified)").gt("expires_at", new Date().toISOString()).order("created_at");
+  const by = {}; (data || []).forEach(x => (by[x.user_id] = by[x.user_id] || { uid:x.user_id, p:x.profiles, items:[] }).items.push(x));
+  const mine = by[me.id] || { uid:me.id, p:profile, items:[] }; delete by[me.id];
+  stGroups = [mine, ...Object.values(by).sort((a, b) => new Date(b.items.at(-1).created_at) - new Date(a.items.at(-1).created_at))];
+  box.innerHTML = stGroups.map(storyBubble).join("");
+}
+async function addStory(inp){
+  const f = inp.files[0]; inp.value = ""; if (!f) return;
+  toast("Adding to your story..."); const up = await uploadMedia(f); if (up.error) return toast(up.error.message);
+  const r = await db.from("stories").insert({ user_id:me.id, media_path:up.path, media_type:up.type }); toast(r.error ? r.error.message : "Story added"); loadStories();
+}
+function openStory(i){ svG = stGroups[i]; if (!svG || !svG.items.length) return; svI = 0; showStory(); }
+function closeStory(){ clearTimeout(svT); document.getElementById("storyview")?.remove(); svG = null; }
+function stepStory(d){ if (!svG) return; svI += d; if (svI < 0) svI = 0; if (svI >= svG.items.length) return closeStory(); showStory(); }
+function showStory(){
+  clearTimeout(svT); const it = svG.items[svI]; if (!it) return closeStory();
+  let el = document.getElementById("storyview"); if (!el) { el = document.createElement("div"); el.id = "storyview"; document.body.appendChild(el); }
+  const url = photoUrl(it.media_path), own = svG.uid === me.id;
+  el.innerHTML = `<div class="sv-bars">${svG.items.map((_, k) => `<span class="${k < svI ? "done" : k === svI ? "cur" : ""}"></span>`).join("")}</div>
+    <div class="sv-head"><span class="avatar sm" style="cursor:default">${avatarInner(svG.p)}</span><strong>${own ? "Your story" : esc(svG.p?.full_name || "")}</strong><span class="meta" style="color:#ddd">${ago(it.created_at)}</span><span style="flex:1"></span>
+    ${own ? `<button class="lnk" style="color:#fff" onclick="delStory('${it.id}')">Delete</button>` : ""}<button class="lnk" style="color:#fff;font-size:1.3rem" onclick="closeStory()" aria-label="Close">✕</button></div>
+    ${it.media_type === "video" ? `<video class="sv-media" src="${url}" autoplay playsinline></video>` : `<img class="sv-media" src="${url}" alt="">`}
+    <div class="sv-prev" onclick="stepStory(-1)"></div><div class="sv-next" onclick="stepStory(1)"></div>`;
+  const v = el.querySelector("video");
+  if (v) { v.onended = () => stepStory(1); v.play().catch(() => {}); } else svT = setTimeout(() => stepStory(1), 5000);
+}
+async function delStory(id){
+  if (!confirm("Delete this story?")) return;
+  const r = await db.from("stories").delete().eq("id",id); if (r.error) return toast(r.error.message);
+  closeStory(); loadStories(); toast("Story deleted");
+}
+
 // ---------- Install as app ----------
 let deferred = null;
 window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferred = e; $("#inst").style.display = "block"; });
@@ -1135,7 +1219,7 @@ window.addEventListener("appinstalled", () => { $("#inst").style.display = "none
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 db.auth.onAuthStateChange(() => {});
-refreshUser();
+refreshUser().then(() => { const sp = new URLSearchParams(location.search).get("post"); if (sp) openPost(sp, true); });
 </script>
 </body>
 </html>
