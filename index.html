@@ -281,6 +281,8 @@ main:has(.reelwrap){padding:0;max-width:none}.feedcol:has(.reelwrap){max-width:n
 .mt{display:flex;gap:6px;align-items:center;min-width:0;color:var(--ink);font-size:.9rem}.mt svg{width:18px;height:18px;flex:none}.mt span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .crop{position:relative;width:280px;height:280px;max-width:100%;margin:0 auto;border-radius:50%;overflow:hidden;touch-action:none;background:#000;cursor:grab}.crop canvas{display:block;width:280px;height:280px}
 .seg{display:flex;gap:6px;margin-bottom:12px}.seg button{flex:1;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:99px;padding:8px;font:inherit;cursor:pointer}.seg button.on{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.distag{background:var(--head);color:var(--mute);font-size:.8rem;text-align:center;padding:5px;border-bottom:1px solid var(--line)}
+.avwrap{position:relative;flex:none}.odot{position:absolute;right:0;bottom:0;width:13px;height:13px;border-radius:50%;background:#34c759;border:2px solid var(--card)}
 </style>
 </head>
 <body>
@@ -315,9 +317,9 @@ async function refreshUser(){
   if (me) { const { data } = await db.from("profiles").select("*").eq("id", me.id).single(); profile = data; }
   if (!booted) { booted = true; if (me) { tab = "chats"; history.replaceState({ name:"tab", arg:"chats", d:0 }, ""); } }
   $("#hp").innerHTML = me ? avatarInner(profile) : ICON.login;
-  drawNav(); render(); if (me) { updateBadge(); startNotifs(); loadFollows(); loadPrefs(); } else unreadN = 0;
+  drawNav(); render(); if (me) { updateBadge(); startNotifs(); loadFollows(); loadPrefs(); pingSeen(); } else unreadN = 0;
 }
-async function logout(){ if (nchan) { db.removeChannel(nchan); nchan = null; } setNB(0); await db.auth.signOut(); tab="home"; refreshUser(); }
+async function logout(){ if (nchan) { db.removeChannel(nchan); nchan = null; } if (nchan2) { db.removeChannel(nchan2); nchan2 = null; } setNB(0); await db.auth.signOut(); tab="home"; refreshUser(); }
 
 function drawNav(){
   const t = [["home","Home"]];
@@ -417,7 +419,8 @@ function login(){
   <div><label>Password</label><input name="password" type="password" required></div>
   <div class="w"><button class="btn" type="submit">Log in</button></div></form></div>
   <div class="panel"><h2>New here? Sign up</h2><form class="f" id="sg">
-  <div><label>Your name</label><input name="full_name" required></div>
+  <div><label>Your name (public)</label><input name="full_name" required></div>
+  <div><label>Username (unique, public)</label><input name="username" required minlength="3" maxlength="20" pattern="[a-z0-9_.]{3,20}" autocapitalize="none" autocomplete="off" placeholder="e.g. tina_k" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_.]/g,'')"></div>
   <div><label>Phone</label><input name="phone" placeholder="2547XXXXXXXX"></div>
   <div><label>Email</label><input name="email" type="email" required></div>
   <div><label>Password (6+ characters)</label><input name="password" type="password" minlength="6" required></div>
@@ -427,8 +430,11 @@ function login(){
     const { error } = await db.auth.signInWithPassword({ email:f.email, password:f.password });
     if (error) return toast(error.message); tab="chats"; refreshUser(); };
   $("#sg").onsubmit = async e => { e.preventDefault(); const f=Object.fromEntries(new FormData(e.target));
-    const { data, error } = await db.auth.signUp({ email:f.email, password:f.password, options:{ data:{ full_name:f.full_name, phone:f.phone, role:f.role } } });
-    if (error) return toast(error.message);
+    const uname = (f.username || "").trim().toLowerCase();
+    if (/\+/.test((f.email || "").split("@")[0])) return toast("Please use your main email address (without a + part).");
+    const av = await db.rpc("username_available", { u:uname }); if (av.data === false) return toast("That username is already taken.");
+    const { data, error } = await db.auth.signUp({ email:f.email, password:f.password, options:{ data:{ full_name:f.full_name, phone:f.phone, username:uname } } });
+    if (error) return toast(/database error/i.test(error.message) ? "This email already has an account, or that username is taken." : error.message);
     if (!data.session) return toast("Check your email to confirm, then log in");
     tab="chats"; refreshUser(); };
 }
@@ -452,7 +458,7 @@ const bubble = m => {
   const own = m.sender_id === me.id;
   if (m.deleted_at) return `<div class="m del ${own ? "me" : ""}" data-mid="${m.id}" data-own="${own ? 1 : 0}">${ICON.ban}<i> This message was deleted</i></div>`;
   const nm = bnames && !own ? `<div class="sn">${esc(bnames[m.sender_id] || "User")}</div>` : "";
-  return `<div class="m ${own ? "me" : ""}" data-mid="${m.id}" data-own="${own ? 1 : 0}" data-txt="${!m.media_path && !m.view_once && m.body ? 1 : ""}">${nm}${mediaHtml(m, own)}${m.body ? esc(m.body) : ""}<span class="bt">${m.edited_at ? "edited · " : ""}${hm(m.created_at)}${own ? tickHtml(m) : ""}</span></div>`;
+  return `<div class="m ${own ? "me" : ""}" data-mid="${m.id}" data-own="${own ? 1 : 0}" ${m.expires_at ? `data-exp="${+new Date(m.expires_at)}"` : ""} data-txt="${!m.media_path && !m.view_once && m.body ? 1 : ""}">${nm}${mediaHtml(m, own)}${m.body ? esc(m.body) : ""}<span class="bt">${m.edited_at ? "edited · " : ""}${hm(m.created_at)}${own ? tickHtml(m) : ""}</span></div>`;
 };
 function addMsg(m){
   if (shown.has(m.id)) return; shown.add(m.id);
@@ -660,7 +666,7 @@ function toggleMenu(e){
   e.stopPropagation(); const m = $("#menu"); if (!m.hidden) { m.hidden = true; return; }
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
   m.innerHTML = (me ? `<button onclick="openProfile('${me.id}')">My profile</button>` : '<button onclick="go(\'login\')">Log in or sign up</button>')
-    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? '<button onclick="logout()">Log out</button>' : "") + '<div class="meta" style="padding:8px 12px">TUchat version 7 (wallpaper saved to account)</div>';
+    + `<button onclick="toggleTheme()">${dark ? "Switch to light mode" : "Switch to dark mode"}</button>` + (me ? `<button onclick="toggleSeen()">Last seen: ${profile?.show_seen === false ? "Off" : "On"}</button><button onclick="logout()">Log out</button>` : "") + '<div class="meta" style="padding:8px 12px">TUchat version 8</div>';
   m.hidden = false;
 }
 document.addEventListener("click", () => { const m = $("#menu"); if (m) m.hidden = true; const g = document.getElementById("gmenu"); if (g) g.hidden = true; });
@@ -679,7 +685,7 @@ async function openProfile(uid, quiet){
   closeSheet(); tab = ""; drawNav(); if (!quiet) push("profile", uid); $("#view").innerHTML = '<div class="empty"><div class="spin"></div></div>';
   const mine = !!me && me.id === uid;
   const [pr, ps, fg, fw, fr] = await Promise.all([
-    db.from("profiles").select("id,full_name,bio,town,business_name,role,verified,avatar_path,followers_count" + (mine ? ",phone" : "")).eq("id",uid).single(),
+    db.from("profiles").select("id,full_name,bio,town,business_name,role,verified,avatar_path,followers_count,username,last_seen_at" + (mine ? ",phone" : "")).eq("id",uid).single(),
     db.from("posts").select("id,image_path,media_type").eq("author_id",uid).not("image_path","is",null).order("created_at",{ascending:false}).limit(30),
     db.from("follows").select("*",{count:"exact",head:true}).eq("follower_id",uid),
     me ? db.from("follows").select("follower_id").eq("follower_id",me.id).eq("followee_id",uid).maybeSingle() : Promise.resolve({data:null}),
@@ -689,12 +695,13 @@ async function openProfile(uid, quiet){
   const next = n < 50 ? `${50-n} more followers for a Bronze crown` : n < 100 ? `${100-n} more for Silver` : n < 1000 ? `${1000-n} more for Gold` : "Gold crown reached";
   $("#view").innerHTML = `<div class="panel" style="max-width:640px;margin:0 auto 14px"><div style="display:flex;gap:14px;align-items:center">
     <div class="avatar big">${avatarInner(u)}</div><div><h2 style="margin:0">${esc(u.business_name || u.full_name || "User")}${crown(n)}${tick(u.verified)}</h2>
-    <div class="meta">${u.verified ? "Verified account" : ""}${u.verified && u.town ? " · " : ""}${esc(u.town || "")}</div></div></div>
+    ${u.username ? `<div class="meta">@${esc(u.username)}</div>` : ""}<div class="meta">${u.verified ? "Verified account" : ""}${u.verified && u.town ? " · " : ""}${esc(u.town || "")}</div>${!mine && u.last_seen_at ? `<div class="meta">${lastSeenText(u.last_seen_at)}</div>` : ""}</div></div>
     ${u.bio ? `<p class="cap">${esc(u.bio)}</p>` : ""}
     <div class="meta"><strong>${n}</strong> followers · <strong>${fg.count || 0}</strong> following · <strong>${ps.data.length}</strong> photos · ${next}</div>
     ${mine ? "" : `<div class="row"><button class="btn ${following ? "alt" : ""}" onclick="toggleFollow('${uid}',${following})">${following ? "Following ✓" : "Follow"}</button>${friendBtn(fr.data, uid)}</div>`}</div>
     ${mine ? `<div class="panel" style="max-width:640px;margin:0 auto 14px"><h3>Edit profile</h3><form class="f" id="pf2">
-      <div><label>Your name</label><input name="full_name" value="${esc(u.full_name)}" required></div>
+      <div><label>Name (public)</label><input name="full_name" value="${esc(u.full_name)}" required></div>
+      <div><label>Username (unique, public)</label><input name="username" value="${esc(u.username)}" required minlength="3" maxlength="20" pattern="[a-z0-9_.]{3,20}" autocapitalize="none" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_.]/g,'')"></div>
       <div><label>Business name (companies and mechanics)</label><input name="business_name" value="${esc(u.business_name)}"></div>
       <div><label>Phone</label><input name="phone" value="${esc(u.phone)}"></div>
       <div><label>Town</label><input name="town" value="${esc(u.town)}"></div>
@@ -706,12 +713,12 @@ async function openProfile(uid, quiet){
     if (b) { avatarBlob = b; ev.target.closest("label").querySelector(".pn").textContent = "Photo ready ✓"; const big = document.querySelector(".avatar.big"); if (big) big.innerHTML = `<img src="${URL.createObjectURL(b)}" alt="">`; } else { ev.target.value = ""; avatarBlob = null; } }); }
   if (mine) $("#pf2").onsubmit = async e => {
     e.preventDefault(); const f = new FormData(e.target); $("#ps").disabled = true;
-    const upd = { full_name:f.get("full_name"), business_name:f.get("business_name") || null, phone:f.get("phone") || null, town:f.get("town") || null, bio:f.get("bio") || null };
+    const upd = { full_name:f.get("full_name"), username:(f.get("username") || "").trim().toLowerCase(), business_name:f.get("business_name") || null, phone:f.get("phone") || null, town:f.get("town") || null, bio:f.get("bio") || null };
     if (avatarBlob) { const path = `${me.id}/avatar-${Date.now()}.jpg`;
       const up = await db.storage.from("vehicle-photos").upload(path, avatarBlob, { contentType:"image/jpeg" });
       if (up.error) { toast(up.error.message); $("#ps").disabled = false; return; } upd.avatar_path = path; }
     const r = await db.from("profiles").update(upd).eq("id", me.id);
-    toast(r.error ? r.error.message : "Profile saved"); await refreshUser(); openProfile(me.id, true);
+    toast(r.error ? (r.error.code === "23505" ? "That username is taken." : r.error.message) : "Profile saved"); await refreshUser(); openProfile(me.id, true);
   };
 }
 async function toggleFollow(uid, isFollowing){
@@ -910,12 +917,12 @@ async function runSearch(q){
   try { localStorage.setItem("gs-recent", JSON.stringify([q, ...recent().filter(x => x !== q)].slice(0, 8))); } catch (e) {}
   $("#sr").innerHTML = '<div class="empty"><div class="spin"></div></div>'; const l = `%${q}%`;
   const [u, g, p] = await Promise.all([
-    db.from("profiles").select("id,full_name,business_name,avatar_path,followers_count,verified").or(`full_name.ilike.${l},business_name.ilike.${l}`).limit(8),
+    db.from("profiles").select("id,full_name,business_name,avatar_path,followers_count,verified,username").or(`full_name.ilike.${l},business_name.ilike.${l},username.ilike.${l}`).limit(8),
     db.from("groups").select("id,name,description,privacy").or(`name.ilike.${l},description.ilike.${l}`).limit(6),
     db.from("posts").select(POST_SEL).ilike("caption", l).order("created_at",{ascending:false}).limit(10)]);
   posts = p.data || []; feedRender = null;
   const sec = (title, arr, html) => arr?.length ? `<h3>${title}</h3>${html}` : "";
-  const out = sec("People", u.data, `<div class="panel">${(u.data||[]).map(o => `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${o.id}')">${avatarInner(o)}</button>${nameLink({full_name:o.business_name||o.full_name,followers_count:o.followers_count,verified:o.verified},o.id)}</div>`).join("")}</div>`)
+  const out = sec("People", u.data, `<div class="panel">${(u.data||[]).map(o => `<div class="q" style="display:flex;gap:10px;align-items:center"><button class="avatar sm" onclick="openProfile('${o.id}')">${avatarInner(o)}</button>${nameLink({full_name:o.business_name||o.full_name,followers_count:o.followers_count,verified:o.verified},o.id)}${o.username ? ` <span class="meta">@${esc(o.username)}</span>` : ""}</div>`).join("")}</div>`)
     + sec("Groups", g.data, (g.data||[]).map(x => `<article class="panel car click" onclick="openGroup('${x.id}')"><strong>${esc(x.name)}</strong><div class="meta">${lock(x.privacy)}</div><div class="meta">${esc(x.description||"")}</div></article>`).join(""))
     + (posts.length ? '<h3>Posts</h3><div id="plist"></div>' : "");
   $("#sr").innerHTML = out || `<div class="empty">No results for "${esc(q)}".</div>`;
@@ -961,24 +968,25 @@ async function openDm(uid, quiet){
   tab = "friends"; drawNav(); if (!quiet) push("dm", uid);
   $("#view").innerHTML = '<div class="empty"><div class="spin"></div></div>';
   const [a, b] = [me.id, uid].sort();
-  let { data:t } = await db.from("dm_threads").select("id").eq("user_a",a).eq("user_b",b).maybeSingle();
+  let { data:t } = await db.from("dm_threads").select("id,disappear_secs").eq("user_a",a).eq("user_b",b).maybeSingle();
   if (!t) { const r = await db.from("dm_threads").insert({ user_a:a, user_b:b }).select("id").single();
     if (r.error) { toast("You can only chat privately with friends"); return go("friends", true); } t = r.data; }
-  const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count,verified").eq("id",uid).single(),
+  const [pr, ms] = await Promise.all([db.from("profiles").select("id,full_name,avatar_path,followers_count,verified,last_seen_at").eq("id",uid).single(),
     db.from("dm_messages").select("*").eq("thread_id",t.id).order("created_at")]);
-  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curKind = "dm"; bnames = null; curPeer = uid; db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("ref_id",t.id).eq("type","message").then(() => nbRefresh()); db.rpc("mark_dm_read", { tid:t.id }).then(() => {}); curThread = t.id;
+  shown = new Set((ms.data||[]).map(m => m.id)); markSeen(t.id); curThread = t.id; curKind = "dm"; bnames = null; curPeer = uid; curDisappear = t.disappear_secs || 0; db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("ref_id",t.id).eq("type","message").then(() => nbRefresh()); db.rpc("mark_dm_read", { tid:t.id }).then(() => {}); curThread = t.id;
   $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><button class="avatar" onclick="openProfile('${uid}')">${avatarInner(pr.data)}</button>
-    <div style="flex:1;min-width:0"><div style="font-weight:700">${nameLink(pr.data,uid)}</div><div class="meta" id="tstat">Private chat</div></div><button class="iconbtn" onclick="openChatSettings()" aria-label="Chat settings">${ICON.tune}</button></div>
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${nameLink(pr.data,uid)}</div><div class="meta" id="tstat">${esc(lastSeenText(pr.data.last_seen_at) || "Private chat")}</div></div><button class="iconbtn" onclick="openChatSettings()" aria-label="Chat settings">${ICON.tune}</button></div>
     <div class="msgs" id="ms">${(ms.data||[]).map(bubble).join("")}</div>
     <div class="cin" id="cin"><div class="norm"><button class="iconbtn attach" onclick="openAttach()" aria-label="Attach, view once, settings">${ICON.plus}</button>
     <input id="mi" placeholder="Message" maxlength="2000" autocomplete="off"><button class="iconbtn" id="mic" aria-label="Record a voice note" onclick="recStart()">${ICON.mic}</button>
     <button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div>
     <div class="recbar"><span class="recdot"></span><span id="rt">0:00</span><span class="meta" style="flex:1">Recording...</span>
     <button class="iconbtn" onclick="recStop(false)" aria-label="Cancel">✕</button><button class="sendbtn" onclick="recStop(true)" aria-label="Send voice note">${ICON.send}</button></div></div></div></div>`;
-  const box = $("#ms"); setChatColor(); stickBottom(box);
+  const box = $("#ms"); setChatColor(); chatExtras(); stickBottom(box);
   if (chan) db.removeChannel(chan);
   chan = db.channel("dm"+t.id).on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => { addMsg(p.new); markSeen(t.id); if (p.new.sender_id !== me.id && !document.hidden) db.rpc("mark_dm_read", { tid:t.id }).then(() => {}); })
     .on("postgres_changes", { event:"UPDATE", schema:"public", table:"dm_messages", filter:"thread_id=eq."+t.id }, p => updateTick(p.new))
+    .on("postgres_changes", { event:"UPDATE", schema:"public", table:"dm_threads", filter:"id=eq."+t.id }, p => disChanged(p.new.disappear_secs))
     .on("broadcast", { event:"typing" }, p => showTyping(p.payload)).subscribe();
   const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
     const r = await db.from("dm_messages").insert({ thread_id:t.id, sender_id:me.id, body:v }).select().single();
@@ -1007,7 +1015,7 @@ const seen = () => { try { return JSON.parse(localStorage.getItem("gs-seen") || 
 function markSeen(id){ try { const o = seen(); o[id] = Date.now(); localStorage.setItem("gs-seen", JSON.stringify(o)); } catch (e) {} }
 let unreadN = 0, curKind = "dm", bnames = null;
 async function loadInbox(){
-  const P = "id,full_name,avatar_path,followers_count,verified";
+  const P = "id,full_name,avatar_path,followers_count,verified,last_seen_at";
   const [dt, cv, gc] = await Promise.all([
     db.from("dm_threads").select(`id,user_a,user_b,created_at,a:profiles!dm_threads_user_a_fkey(${P}),b:profiles!dm_threads_user_b_fkey(${P})`),
     db.from("conversations").select(`id,buyer_id,seller_id,created_at,listings(make,model,year),buyer:profiles!conversations_buyer_id_fkey(${P}),seller:profiles!conversations_seller_id_fkey(${P})`),
@@ -1035,7 +1043,7 @@ async function loadInbox(){
   unreadN = inbox.filter(x => x.unread).length; drawNav();
   return {};
 }
-async function updateBadge(){ try { db.rpc("mark_delivered").then(() => {}); await loadInbox(); } catch (e) {} }
+async function updateBadge(){ try { db.rpc("mark_delivered").then(() => {}); await loadInbox(); if (document.getElementById("cl")) drawInbox(); } catch (e) {} }
 setInterval(() => { if (me && !document.hidden) updateBadge(); }, 45000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && me) updateBadge(); });
 async function chats(){
@@ -1049,7 +1057,7 @@ async function chats(){
 function drawInbox(){
   const q = ($("#cq")?.value || "").toLowerCase();
   const list = inbox.filter(x => (x.name + " " + (x.tag || "")).toLowerCase().includes(q));
-  $("#cl").innerHTML = list.map(x => `<div class="crow ${x.unread ? "unread" : ""}" style="border-left:5px solid ${chatColor(x.key)}" onclick="${x.open}"><div class="avatar" style="background:${chatColor(x.key)}">${avatarInner(x.p)}</div>
+  $("#cl").innerHTML = list.map(x => `<div class="crow ${x.unread ? "unread" : ""}" style="border-left:5px solid ${chatColor(x.key)}" onclick="${x.open}"><div class="avwrap"><div class="avatar" style="background:${chatColor(x.key)}">${avatarInner(x.p)}</div>${x.p?.last_seen_at && Date.now() - new Date(x.p.last_seen_at) < 120000 ? '<i class="odot"></i>' : ""}</div>
     <div class="cbody"><div class="ctop"><strong>${esc(x.name)}</strong>${tick(x.p?.verified)}<span class="meta">${ago(x.time)}</span></div>
     ${x.tag ? `<div class="meta">${esc(x.tag)}</div>` : ""}<div class="csub">${esc(x.sub)}</div></div>${x.unread ? '<span class="dot"></span>' : ""}</div>`).join("")
     || '<div class="empty">No chats yet. Tap the people icon to start one with a friend, or tap Chat on a vehicle.</div>';
@@ -1079,12 +1087,12 @@ async function openGc(id, quiet){
   closeSheet(); tab = "chats"; drawNav(); if (!quiet) push("gc", id);
   $("#view").innerHTML = '<div class="empty"><div class="spin"></div></div>';
   const [g, mem, ms] = await Promise.all([
-    db.from("gchats").select("id,name,avatar_path,description,created_by").eq("id",id).single(),
+    db.from("gchats").select("id,name,avatar_path,description,created_by,disappear_secs").eq("id",id).single(),
     db.from("gchat_members").select("user_id,profiles!gchat_members_user_id_fkey(full_name)").eq("chat_id",id),
     db.from("gchat_messages").select("*").eq("chat_id",id).order("created_at")]);
   if (g.error) { toast("This group chat is not available"); return go("chats", true); }
   bnames = {}; (mem.data || []).forEach(x => { bnames[x.user_id] = x.profiles?.full_name || "User"; });
-  curThread = id; curKind = "gc"; curPeer = null; shown = new Set((ms.data || []).map(m => m.id)); markSeen(id); db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("ref_id",id).eq("type","group_message").then(() => nbRefresh());
+  curThread = id; curKind = "gc"; curPeer = null; curDisappear = g.data.disappear_secs || 0; shown = new Set((ms.data || []).map(m => m.id)); markSeen(id); db.from("notifications").update({ read:true }).eq("user_id",me.id).eq("ref_id",id).eq("type","group_message").then(() => nbRefresh());
   const names = Object.values(bnames).join(", ");
   $("#view").innerHTML = `<div class="feedcol"><div class="panel cwin"><div class="chead"><button class="avatar" onclick="openGcInfo('${id}')" aria-label="Group info">${avatarInner({ full_name:g.data.name, avatar_path:g.data.avatar_path })}</button>
     <div style="flex:1;min-width:0;cursor:pointer" onclick="openGcInfo('${id}')"><div style="font-weight:700">${esc(g.data.name)}</div><div class="meta csub" id="tstat">${esc(names)}</div></div><button class="iconbtn" onclick="openChatSettings()" aria-label="Chat settings">${ICON.tune}</button><button class="lnk" onclick="leaveGc('${id}')">Leave</button></div>
@@ -1094,9 +1102,9 @@ async function openGc(id, quiet){
     <button class="sendbtn" id="sb2" aria-label="Send">${ICON.send}</button></div>
     <div class="recbar"><span class="recdot"></span><span id="rt">0:00</span><span class="meta" style="flex:1">Recording...</span>
     <button class="iconbtn" onclick="recStop(false)" aria-label="Cancel">✕</button><button class="sendbtn" onclick="recStop(true)" aria-label="Send voice note">${ICON.send}</button></div></div></div></div>`;
-  const box = $("#ms"); setChatColor(); stickBottom(box);
+  const box = $("#ms"); setChatColor(); chatExtras(); stickBottom(box);
   if (chan) db.removeChannel(chan);
-  chan = db.channel("gc"+id).on("postgres_changes", { event:"INSERT", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => { addMsg(p.new); markSeen(id); }).on("postgres_changes", { event:"UPDATE", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => updateTick(p.new)).on("broadcast", { event:"typing" }, p => showTyping(p.payload)).subscribe();
+  chan = db.channel("gc"+id).on("postgres_changes", { event:"INSERT", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => { addMsg(p.new); markSeen(id); }).on("postgres_changes", { event:"UPDATE", schema:"public", table:"gchat_messages", filter:"chat_id=eq."+id }, p => updateTick(p.new)).on("postgres_changes", { event:"UPDATE", schema:"public", table:"gchats", filter:"id=eq."+id }, p => disChanged(p.new.disappear_secs)).on("broadcast", { event:"typing" }, p => showTyping(p.payload)).subscribe();
   const send = async () => { const v = $("#mi").value.trim(); if (!v) return; $("#mi").value = "";
     const r = await db.from("gchat_messages").insert({ chat_id:id, sender_id:me.id, body:v }).select().single();
     if (r.error) toast(r.error.message); else addMsg(r.data); };
@@ -1200,7 +1208,7 @@ const ntext = n => ({ friend_request:"sent you a friend request", friend_accept:
 function setNB(n){ const e = document.getElementById("nb"); if (!e) return; e.hidden = !n; e.textContent = n > 9 ? "9+" : n; }
 async function nbRefresh(){ if (!me) return setNB(0); const r = await db.from("notifications").select("id",{count:"exact",head:true}).eq("user_id",me.id).eq("read",false); setNB(r.count || 0); }
 function startNotifs(){
-  if (nchan) return; nbRefresh();
+  if (nchan) return; nbRefresh(); watchInbox();
   nchan = db.channel("notif"+me.id).on("postgres_changes", { event:"*", schema:"public", table:"notifications", filter:"user_id=eq."+me.id }, async p => {
     const n = p.new; nbRefresh(); if (!n || n.read) return; if (n.type === "message") db.rpc("mark_delivered").then(() => {});
     if ((n.type === "message" || n.type === "group_message") && tab === "chats" && curThread === n.ref_id) { db.from("notifications").update({ read:true }).eq("id",n.id).then(() => nbRefresh()); return; }
@@ -1498,6 +1506,9 @@ function openChatSettings(scope = "chat"){
     <div class="bgs"><button type="button" class="bgsw ${eff.wall === "" ? "sel" : ""}" data-w="-1" style="background:#111 url(/chat-bg.jpg) center/cover" aria-label="Default cats"></button>${sw(WALLS, eff.wall, "w")}</div>
     <div class="meta" style="margin-top:14px">My message color</div><div class="bgs">${sw(BUBBLES, eff.bubble, "b")}</div>
     <div class="meta" style="margin-top:14px">Text size (all chats)</div><div class="row">${[["Small", 0.9], ["Medium", 1], ["Large", 1.15]].map(([l, v]) => `<button class="btn ${chatPrefs.fz === v ? "" : "alt"}" data-fz="${v}">${l}</button>`).join("")}</div>
+    <div class="meta" style="margin-top:14px">Disappearing messages (this chat)</div>
+    <div class="row">${[["Off", 0], ["24 hours", 86400], ["7 days", 604800], ["90 days", 7776000]].map(([l, v]) => `<button class="btn ${curDisappear === v ? "" : "alt"}" data-dis="${v}" style="padding:8px 4px;font-size:.8rem">${l}</button>`).join("")}</div>
+    <p class="meta" style="font-weight:400;margin:6px 0 0">New messages disappear after this time. Anyone in the chat can change it.</p>
     <div class="row" style="margin-top:16px"><button class="btn alt" data-reset>Reset ${scope === "chat" ? "this chat" : "all"}</button><button class="btn" data-ok>Done</button></div>`,
   (w, done) => {
     const tgt = () => scope === "all" ? chatPrefs.all : (chatPrefs.chat[curThread] = chatPrefs.chat[curThread] || {});
@@ -1507,6 +1518,9 @@ function openChatSettings(scope = "chat"){
     w.querySelectorAll("[data-w]").forEach(b => b.onclick = () => { tgt().wall = b.dataset.w === "-1" ? "" : WALLS[+b.dataset.w]; savePrefs(); mark("[data-w]", b); });
     w.querySelectorAll("[data-b]").forEach(b => b.onclick = () => { tgt().bubble = BUBBLES[+b.dataset.b]; savePrefs(); mark("[data-b]", b); });
     w.querySelectorAll("[data-fz]").forEach(b => b.onclick = () => { chatPrefs.fz = +b.dataset.fz; savePrefs(); w.querySelectorAll("[data-fz]").forEach(x => x.classList.toggle("alt", x !== b)); });
+    w.querySelectorAll("[data-dis]").forEach(b => b.onclick = async () => { const v = +b.dataset.dis;
+      const r = await db.rpc("set_disappear", { kind:curKind === "gc" ? "gc" : "dm", cid:curThread, secs:v }); if (r.error) return toast(r.error.message);
+      curDisappear = v; w.querySelectorAll("[data-dis]").forEach(x => x.classList.toggle("alt", +x.dataset.dis !== v)); updateDisBanner(); toast(v ? "Disappearing messages are on" : "Disappearing messages are off"); });
     w.querySelector("[data-reset]").onclick = () => { if (scope === "chat") delete chatPrefs.chat[curThread]; else { chatPrefs.all = { wall:"", bubble:"" }; chatPrefs.fz = 1; } savePrefs(); done(null); openChatSettings(scope); };
     w.querySelector("[data-ok]").onclick = () => done(null);
   });
@@ -1551,7 +1565,7 @@ ICON.trash = _i('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>');
 ICON.ban = _i('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>');
 const hiddenMsgs = (() => { try { return new Set(JSON.parse(localStorage.getItem("gs-hidden") || "[]")); } catch (e) { return new Set(); } })();
 const clearedAt = () => { try { return JSON.parse(localStorage.getItem("gs-cleared") || "{}"); } catch (e) { return {}; } };
-const vis = m => !hiddenMsgs.has(m.id) && new Date(m.created_at).getTime() > (clearedAt()[curThread] || 0);
+const vis = m => !hiddenMsgs.has(m.id) && !(m.expires_at && new Date(m.expires_at) <= new Date()) && new Date(m.created_at).getTime() > (clearedAt()[curThread] || 0);
 function mediaHtml(m, own){
   if (m.view_once) return m.opened_at ? `<div class="vo done">${ICON.once} Opened</div>`
     : own ? `<div class="vo">${ICON.once} ${m.media_type === "video" ? "Video" : "Photo"} · view once</div>`
@@ -1746,6 +1760,45 @@ async function uploadAudio(f){
   const up = await db.storage.from("vehicle-photos").upload(path, f, { contentType: f.type || "audio/mpeg" }); return up.error ? { error:up.error } : { path };
 }
 document.addEventListener("visibilitychange", () => { if (document.hidden) document.querySelectorAll("video").forEach(v => v.pause()); });
+
+// ---------- Last seen, disappearing messages, inbox watcher ----------
+let curDisappear = 0, seenT = null, nchan2 = null;
+function lastSeenText(ts){
+  if (!ts) return ""; const d = new Date(ts), diff = Date.now() - d; if (diff < 120000) return "online";
+  const t = d.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }), same = d.toDateString() === new Date().toDateString(), y = d.toDateString() === new Date(Date.now() - 86400000).toDateString();
+  return "last seen " + (same ? "today at " + t : y ? "yesterday at " + t : d.toLocaleDateString([], { day:"numeric", month:"short" }) + " at " + t);
+}
+function pingSeen(force){ if (!me || profile?.show_seen === false || (document.hidden && !force)) return; db.from("profiles").update({ last_seen_at:new Date().toISOString() }).eq("id", me.id).then(() => {}); }
+setInterval(() => pingSeen(), 60000);
+document.addEventListener("visibilitychange", () => pingSeen(true));
+async function toggleSeen(){
+  const on = profile?.show_seen === false;
+  const r = await db.from("profiles").update({ show_seen:on, last_seen_at:on ? new Date().toISOString() : null }).eq("id", me.id);
+  if (r.error) return toast(r.error.message); profile.show_seen = on; toast(on ? "Others can see when you were last online" : "Your last seen is now hidden");
+}
+function updateDisBanner(){
+  const d = document.getElementById("distag"); if (!d) return; const L = { 86400:"24 hours", 604800:"7 days", 7776000:"90 days" }[curDisappear];
+  d.hidden = !L; if (L) d.textContent = "⏱ New messages disappear after " + L;
+}
+function disChanged(v){ v = v || 0; if (v === curDisappear) return; curDisappear = v; updateDisBanner(); toast(v ? "Disappearing messages were turned on" : "Disappearing messages were turned off"); }
+function chatExtras(){
+  const box = document.getElementById("ms"); if (!box) return;
+  box.insertAdjacentHTML("beforebegin", '<div class="distag" id="distag" hidden></div>'); updateDisBanner();
+  clearInterval(seenT);
+  if (curKind === "dm" && curPeer) seenT = setInterval(async () => {
+    const st = document.getElementById("tstat"); if (!st) return clearInterval(seenT);
+    const { data } = await db.from("profiles").select("last_seen_at").eq("id", curPeer).maybeSingle(), t = lastSeenText(data?.last_seen_at) || "Private chat";
+    st.dataset.orig = t; if (!document.getElementById("tbub")) st.textContent = t;
+  }, 30000);
+}
+setInterval(() => document.querySelectorAll(".m[data-exp]").forEach(el => { if (+el.dataset.exp <= Date.now()) el.remove(); }), 15000);
+function watchInbox(){
+  if (nchan2) return;
+  const ev = (m, cid) => { if (m.sender_id === me.id) return; db.rpc("mark_delivered").then(() => {}); if (cid === curThread && tab === "chats" && document.getElementById("cin")) return; updateBadge(); };
+  nchan2 = db.channel("inbox" + me.id)
+    .on("postgres_changes", { event:"INSERT", schema:"public", table:"dm_messages" }, p => ev(p.new, p.new.thread_id))
+    .on("postgres_changes", { event:"INSERT", schema:"public", table:"gchat_messages" }, p => ev(p.new, p.new.chat_id)).subscribe();
+}
 
 // ---------- Install as app ----------
 let deferred = null;

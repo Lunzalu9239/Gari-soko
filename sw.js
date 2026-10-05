@@ -1,5 +1,5 @@
 // Minimal service worker: lets the app install and open the page shell offline.
-const CACHE = "tuchat-v7";
+const CACHE = "tuchat-v8";
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/", "/icon-192.png"])));
   self.skipWaiting();
